@@ -2,6 +2,9 @@ import express from 'express';
 import cors from 'cors';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { Readable } from 'stream';
+import os from 'os';
+import net from 'net';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -13,7 +16,7 @@ app.use(cors());
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
-// Cache storage
+// Cache storage for scraped data
 let cache = {
   matches: [],
   channels: [],
@@ -21,10 +24,84 @@ let cache = {
 };
 const CACHE_TTL = 3 * 60 * 1000; // 3 minutes
 
-const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36';
+const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
+
+// --------------------------------------------------------------------------
+// 1. Anti-SSRF and Safe URL Validation
+// --------------------------------------------------------------------------
+function isPrivateIp(ip) {
+  if (net.isIPv4(ip)) {
+    const parts = ip.split('.').map(Number);
+    // 0.0.0.0/8
+    if (parts[0] === 0) return true;
+    // 10.0.0.0/8
+    if (parts[0] === 10) return true;
+    // 127.0.0.0/8 (Loopback)
+    if (parts[0] === 127) return true;
+    // 169.254.0.0/16 (Link-local)
+    if (parts[0] === 169 && parts[1] === 254) return true;
+    // 172.16.0.0/12 (172.16.0.0 - 172.31.255.255)
+    if (parts[0] === 172 && parts[1] >= 16 && parts[1] <= 31) return true;
+    // 192.168.0.0/16
+    if (parts[0] === 192 && parts[1] === 168) return true;
+    // Broadcast
+    if (ip === '255.255.255.255') return true;
+    return false;
+  }
+  if (net.isIPv6(ip)) {
+    const normalized = ip.toLowerCase();
+    // ::1 (Loopback)
+    if (normalized === '::1' || normalized === '0:0:0:0:0:0:0:1') return true;
+    // :: (Unspecified)
+    if (normalized === '::' || normalized === '0:0:0:0:0:0:0:0') return true;
+    // Unique Local fc00::/7
+    if (normalized.startsWith('fc') || normalized.startsWith('fd')) return true;
+    // Link Local fe80::/10
+    if (normalized.startsWith('fe80:')) return true;
+    return false;
+  }
+  return false;
+}
+
+function isSafeExternalUrl(rawUrl) {
+  if (!rawUrl || typeof rawUrl !== 'string') {
+    return { safe: false, reason: 'URL nula o no válida' };
+  }
+  let parsed;
+  try {
+    parsed = new URL(rawUrl);
+  } catch (e) {
+    return { safe: false, reason: 'Formato de URL no válido' };
+  }
+
+  // Strictly enforce http or https
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+    return { safe: false, reason: `Protocolo no permitido: ${parsed.protocol}` };
+  }
+
+  const hostname = parsed.hostname.toLowerCase();
+
+  // Block localhost and standard private names
+  if (
+    hostname === 'localhost' ||
+    hostname.endsWith('.localhost') ||
+    hostname.endsWith('.local') ||
+    hostname.endsWith('.internal') ||
+    hostname === '0.0.0.0'
+  ) {
+    return { safe: false, reason: 'Acceso a host local prohibido (Anti-SSRF)' };
+  }
+
+  // Check IP addresses directly
+  if (isPrivateIp(hostname)) {
+    return { safe: false, reason: 'Acceso a direcciones IP privadas prohibido (Anti-SSRF)' };
+  }
+
+  return { safe: true, url: parsed.href };
+}
 
 // Safe fetch helper with timeout
-async function safeFetch(url, options = {}, timeoutMs = 15000) {
+async function safeFetch(url, options = {}, timeoutMs = 12000) {
   const controller = new AbortController();
   const id = setTimeout(() => controller.abort(), timeoutMs);
   try {
@@ -42,7 +119,9 @@ async function safeFetch(url, options = {}, timeoutMs = 15000) {
   }
 }
 
-// Scrape matches schedule from pirlotv.la
+// --------------------------------------------------------------------------
+// 2. Scraper & Parser (UTF-8 Clean)
+// --------------------------------------------------------------------------
 function parseMatches(html) {
   const matches = [];
   const parts = html.split(/<li>\s*<a href=["']#["']>/i);
@@ -78,7 +157,6 @@ function parseMatches(html) {
         const url = optMatch[1].trim();
         const rawName = optMatch[2].trim();
 
-        // Ignore non-streaming legal/contact links
         if (IGNORED_PATHS.some(ign => url.toLowerCase().includes(ign) || rawName.toLowerCase().includes('dmca') || rawName.toLowerCase().includes('aviso'))) {
           continue;
         }
@@ -105,11 +183,9 @@ function parseMatches(html) {
   return matches;
 }
 
-// Scrape permanent 24/7 channels
 function parseChannels(html) {
   const channels = [];
-  const parts = html.split(/<li>\s*<a href=["']#["']>/i);
-  const IGNORED_PATHS = ['dmca.php', 'aviso-legal.php', 'politica.php', 'contacto.php'];
+  const parts = html.split(/<div class=["']menu["']>\s*<a href=["']#["']>/i);
 
   for (let i = 1; i < parts.length; i++) {
     const part = parts[i];
@@ -127,16 +203,11 @@ function parseChannels(html) {
       let optMatch;
       while ((optMatch = optRegex.exec(optionsHtml)) !== null) {
         const url = optMatch[1].trim();
-        const rawName = optMatch[2].trim();
-
-        if (IGNORED_PATHS.some(ign => url.toLowerCase().includes(ign) || rawName.toLowerCase().includes('dmca'))) {
-          continue;
-        }
-
+        const name = optMatch[2].trim();
         options.push({
           url,
-          name: rawName,
-          isHD: rawName.toUpperCase().includes('(HD)') || rawName.toUpperCase().includes('HD')
+          name,
+          isHD: name.toUpperCase().includes('(HD)') || name.toUpperCase().includes('HD')
         });
       }
     }
@@ -163,7 +234,6 @@ function parseChannels(html) {
   return channels;
 }
 
-// Refresh cache
 async function refreshCache() {
   try {
     const [homeRes, chanRes] = await Promise.all([
@@ -180,13 +250,15 @@ async function refreshCache() {
       cache.channels = parseChannels(chanHtml);
     }
     cache.lastUpdated = Date.now();
-    console.log(`[Cache Updated] ${cache.matches.length} matches, ${cache.channels.length} channels.`);
+    console.log(`[Cache Updated] ${cache.matches.length} partidos, ${cache.channels.length} canales.`);
   } catch (err) {
     console.error('[Cache Update Error]:', err.message);
   }
 }
 
-// Multi-tier recursive stream resolver
+// --------------------------------------------------------------------------
+// 3. Multi-tier Recursive Stream Resolver
+// --------------------------------------------------------------------------
 async function resolveStream(startUrl) {
   let currentUrl = startUrl.startsWith('/') ? 'https://pirlotv.la' + startUrl : startUrl;
   let referer = 'https://pirlotv.la/';
@@ -201,6 +273,14 @@ async function resolveStream(startUrl) {
     }
 
     if (currentUrl.startsWith('//')) currentUrl = 'https:' + currentUrl;
+    
+    // SSRF Check on resolved hops
+    const safetyCheck = isSafeExternalUrl(currentUrl);
+    if (!safetyCheck.safe) {
+      console.warn(`[Resolver Blocked Hop] ${safetyCheck.reason} -> ${currentUrl}`);
+      break;
+    }
+
     lastEmbed = currentUrl;
 
     try {
@@ -281,7 +361,6 @@ async function resolveStream(startUrl) {
       }
 
       currentUrl = nextUrl;
-      console.log(`[Resolver Hop ${depth + 1}] -> ${currentUrl}`);
     } catch (e) {
       console.warn(`[Resolver Hop ${depth} Error]:`, e.message);
       break;
@@ -297,7 +376,11 @@ async function resolveStream(startUrl) {
   };
 }
 
-// API Routes
+// --------------------------------------------------------------------------
+// 4. API Endpoints
+// --------------------------------------------------------------------------
+
+// Schedule
 app.get('/api/schedule', async (req, res) => {
   if (Date.now() - cache.lastUpdated > CACHE_TTL || cache.matches.length === 0) {
     await refreshCache();
@@ -309,6 +392,7 @@ app.get('/api/schedule', async (req, res) => {
   });
 });
 
+// Channels
 app.get('/api/channels', async (req, res) => {
   if (Date.now() - cache.lastUpdated > CACHE_TTL || cache.channels.length === 0) {
     await refreshCache();
@@ -320,6 +404,7 @@ app.get('/api/channels', async (req, res) => {
   });
 });
 
+// Manual refresh
 app.get('/api/refresh', async (req, res) => {
   await refreshCache();
   res.json({
@@ -330,10 +415,19 @@ app.get('/api/refresh', async (req, res) => {
   });
 });
 
+// Stream resolver with Anti-SSRF
 app.get('/api/resolve', async (req, res) => {
   const url = req.query.url;
   if (!url) {
-    return res.status(400).json({ ok: false, error: 'Param url is required' });
+    return res.status(400).json({ ok: false, error: 'Parámetro url es obligatorio' });
+  }
+
+  // If it's a relative path on pirlotv, allow it; if absolute, validate safety
+  if (url.startsWith('http://') || url.startsWith('https://')) {
+    const safety = isSafeExternalUrl(url);
+    if (!safety.safe) {
+      return res.status(403).json({ ok: false, error: safety.reason });
+    }
   }
 
   try {
@@ -344,13 +438,156 @@ app.get('/api/resolve', async (req, res) => {
   }
 });
 
-// Proxy for M3U8 Playlist (adds proper Referer, rewrites TS segment URLs)
+// --------------------------------------------------------------------------
+// 5. Auto-Speed Benchmark Endpoint
+// --------------------------------------------------------------------------
+app.post('/api/probe-fastest', async (req, res) => {
+  const options = req.body && Array.isArray(req.body.options) ? req.body.options : [];
+  if (options.length === 0) {
+    return res.status(400).json({ ok: false, error: 'Lista de opciones vacía' });
+  }
+
+  // Evaluate all options in parallel with 4000ms max timeout per probe
+  const probePromises = options.map(async (opt, index) => {
+    try {
+      const resolved = await resolveStream(opt.url);
+      if (!resolved || !resolved.ok) {
+        return { ...opt, index, available: false, latencyMs: 9999, mode: 'unknown' };
+      }
+
+      if (resolved.mode === 'hls' && resolved.streamUrls && resolved.streamUrls.length > 0) {
+        const testTarget = resolved.streamUrls[0];
+        // Probe HLS manifest speed with a lightweight fetch
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 2800);
+        const probeStart = performance.now();
+        try {
+          const testRes = await fetch(testTarget, {
+            method: 'GET',
+            headers: {
+              'User-Agent': USER_AGENT,
+              'Referer': resolved.referer || 'https://xstream.st/'
+            },
+            signal: controller.signal
+          });
+          clearTimeout(timeoutId);
+          // Read first chunk and cancel body to free network
+          if (testRes.body && testRes.body.cancel) testRes.body.cancel();
+          const latencyMs = Math.round(performance.now() - probeStart);
+
+          return {
+            ...opt,
+            index,
+            available: testRes.ok,
+            latencyMs: testRes.ok ? latencyMs : 9999,
+            mode: 'hls',
+            resolvedStream: resolved
+          };
+        } catch (fetchErr) {
+          clearTimeout(timeoutId);
+          return { ...opt, index, available: false, latencyMs: 9999, mode: 'hls' };
+        }
+      } else if (resolved.mode === 'embed' && resolved.embedUrl) {
+        // Probe Embed responsiveness
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 2800);
+        const probeStart = performance.now();
+        try {
+          const testRes = await fetch(resolved.embedUrl, {
+            method: 'HEAD',
+            headers: {
+              'User-Agent': USER_AGENT,
+              'Referer': resolved.referer || 'https://cdplay.live/'
+            },
+            signal: controller.signal
+          });
+          clearTimeout(timeoutId);
+          const latencyMs = Math.round(performance.now() - probeStart);
+          return {
+            ...opt,
+            index,
+            available: testRes.ok || testRes.status === 405, // some hosts deny HEAD with 405 but are active
+            latencyMs: latencyMs,
+            mode: 'embed',
+            resolvedStream: resolved
+          };
+        } catch (embedErr) {
+          clearTimeout(timeoutId);
+          return { ...opt, index, available: true, latencyMs: 850, mode: 'embed', resolvedStream: resolved };
+        }
+      }
+
+      return { ...opt, index, available: false, latencyMs: 9999, mode: 'unknown' };
+    } catch (err) {
+      return { ...opt, index, available: false, latencyMs: 9999, mode: 'error' };
+    }
+  });
+
+  const settled = await Promise.allSettled(probePromises);
+  const results = settled.map((s, i) => s.status === 'fulfilled' ? s.value : { ...options[i], available: false, latencyMs: 9999 });
+
+  // Sort ranking: available HLS first sorted by latencyMs asc, then available embed by latencyMs asc, then unavailable
+  results.sort((a, b) => {
+    if (a.available !== b.available) return a.available ? -1 : 1;
+    if (a.mode === 'hls' && b.mode !== 'hls') return -1;
+    if (a.mode !== 'hls' && b.mode === 'hls') return 1;
+    return a.latencyMs - b.latencyMs;
+  });
+
+  const fastest = results.find(r => r.available) || results[0];
+
+  res.json({
+    ok: true,
+    ranked: results,
+    fastestIndex: fastest ? fastest.index : 0
+  });
+});
+
+// --------------------------------------------------------------------------
+// 6. Network Info (LAN Mobile Handoff)
+// --------------------------------------------------------------------------
+app.get('/api/network-info', (req, res) => {
+  const interfaces = os.networkInterfaces();
+  let localIp = '127.0.0.1';
+
+  // Find non-internal IPv4 (prioritize Wi-Fi or Ethernet: 192.168.x or 10.x or 172.x)
+  for (const name of Object.keys(interfaces)) {
+    for (const iface of interfaces[name]) {
+      if (iface.family === 'IPv4' && !iface.internal) {
+        if (iface.address.startsWith('192.168.') || iface.address.startsWith('10.')) {
+          localIp = iface.address;
+          break;
+        }
+        if (localIp === '127.0.0.1') {
+          localIp = iface.address;
+        }
+      }
+    }
+    if (localIp.startsWith('192.168.') || localIp.startsWith('10.')) break;
+  }
+
+  res.json({
+    ok: true,
+    ip: localIp,
+    port: PORT,
+    localUrl: `http://${localIp}:${PORT}`
+  });
+});
+
+// --------------------------------------------------------------------------
+// 7. M3U8 Playlist Proxy
+// --------------------------------------------------------------------------
 app.get('/api/stream/m3u8', async (req, res) => {
   const targetUrl = req.query.url;
   const referer = req.query.referer || 'https://xstream.st/';
 
   if (!targetUrl) {
-    return res.status(400).send('Missing url parameter');
+    return res.status(400).send('Parámetro url faltante');
+  }
+
+  const safety = isSafeExternalUrl(targetUrl);
+  if (!safety.safe) {
+    return res.status(403).send(`Acceso denegado: ${safety.reason}`);
   }
 
   try {
@@ -362,11 +599,10 @@ app.get('/api/stream/m3u8', async (req, res) => {
     });
 
     if (!response.ok) {
-      return res.status(response.status).send(`Failed to fetch m3u8: ${response.statusText}`);
+      return res.status(response.status).send(`Fallo al obtener m3u8: ${response.statusText}`);
     }
 
     const playlist = await response.text();
-    const parsedTarget = new URL(targetUrl);
     const basePath = targetUrl.substring(0, targetUrl.lastIndexOf('/') + 1);
 
     // Rewrite playlist lines (both sub-playlists and media chunks)
@@ -396,7 +632,7 @@ app.get('/api/stream/m3u8', async (req, res) => {
       return `${endpoint}?url=${encodeURIComponent(absoluteTarget)}&referer=${encodeURIComponent(referer)}`;
     }).join('\n');
 
-    res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
+    res.setHeader('Content-Type', 'application/vnd.apple.mpegurl; charset=utf-8');
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
     res.send(rewritten);
@@ -406,52 +642,106 @@ app.get('/api/stream/m3u8', async (req, res) => {
   }
 });
 
-// Proxy for TS Video Segments
+// --------------------------------------------------------------------------
+// 8. Real High-Performance TS Segment Streaming (Zero RAM Buffering)
+// --------------------------------------------------------------------------
 app.get('/api/stream/ts', async (req, res) => {
   const targetUrl = req.query.url;
   const referer = req.query.referer || 'https://xstream.st/';
 
   if (!targetUrl) {
-    return res.status(400).send('Missing url parameter');
+    return res.status(400).send('Parámetro url faltante');
   }
 
-  try {
-    const response = await safeFetch(targetUrl, {
-      headers: {
-        'Referer': referer,
-        'Origin': new URL(referer).origin
-      }
-    });
+  const safety = isSafeExternalUrl(targetUrl);
+  if (!safety.safe) {
+    return res.status(403).send(`Acceso denegado: ${safety.reason}`);
+  }
 
-    if (!response.ok) {
-      return res.status(response.status).send('Segment fetch failed');
+  // AbortController connected to client socket closure to prevent RAM & worker leaks
+  const controller = new AbortController();
+  req.on('close', () => {
+    controller.abort();
+  });
+
+  try {
+    const upstreamHeaders = {
+      'User-Agent': USER_AGENT,
+      'Referer': referer,
+      'Origin': new URL(referer).origin
+    };
+
+    // Forward Range header if requested by client player
+    if (req.headers.range) {
+      upstreamHeaders['Range'] = req.headers.range;
     }
 
+    const response = await fetch(targetUrl, {
+      headers: upstreamHeaders,
+      signal: controller.signal
+    });
+
+    if (!response.ok && response.status !== 206) {
+      return res.status(response.status).send('Fallo al obtener segmento de video');
+    }
+
+    // Set streaming headers
     res.setHeader('Content-Type', 'video/mp2t');
     res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Expose-Headers', 'Content-Range, Content-Length, Accept-Ranges');
+    res.setHeader('Accept-Ranges', 'bytes');
     res.setHeader('Cache-Control', 'public, max-age=3600');
 
-    // Stream the body directly
-    const buffer = await response.arrayBuffer();
-    res.send(Buffer.from(buffer));
+    if (response.headers.has('content-length')) {
+      res.setHeader('Content-Length', response.headers.get('content-length'));
+    }
+    if (response.status === 206 && response.headers.has('content-range')) {
+      res.status(206);
+      res.setHeader('Content-Range', response.headers.get('content-range'));
+    }
+
+    // Stream directly from response body without buffering in RAM
+    if (response.body) {
+      const nodeStream = Readable.fromWeb(response.body);
+      nodeStream.on('error', (err) => {
+        if (!res.headersSent) res.status(502).end();
+      });
+      nodeStream.pipe(res);
+    } else {
+      res.end();
+    }
   } catch (err) {
-    res.status(502).send('Error streaming segment: ' + err.message);
+    if (err.name === 'AbortError') {
+      // Client disconnected normally, no error log needed
+      return;
+    }
+    console.error('TS streaming error:', err.message);
+    if (!res.headersSent) {
+      res.status(502).send('Error streaming video segment: ' + err.message);
+    }
   }
 });
 
-// Sanitized clean-embed proxy (strips ads, popups, and anti-frame locks so Shaka/Clappr play smoothly)
+// --------------------------------------------------------------------------
+// 9. Sanitized Clean-Embed Proxy (postMessage Audio Control + Click Detection)
+// --------------------------------------------------------------------------
 app.get('/player/clean-embed', async (req, res) => {
   let embedUrl = req.query.url;
   const referer = req.query.referer || 'https://cdplay.live/';
 
   if (!embedUrl || embedUrl === 'about:blank') {
-    return res.status(400).send('Missing url parameter');
+    return res.status(400).send('Parámetro url faltante');
   }
 
   if (embedUrl.startsWith('/')) {
     embedUrl = 'https://pirlotv.la' + embedUrl;
   } else if (embedUrl.startsWith('//')) {
     embedUrl = 'https:' + embedUrl;
+  }
+
+  const safety = isSafeExternalUrl(embedUrl);
+  if (!safety.safe) {
+    return res.status(403).send(`Acceso denegado: ${safety.reason}`);
   }
 
   let originHeader = 'https://cdplay.live';
@@ -473,12 +763,12 @@ app.get('/player/clean-embed', async (req, res) => {
     if (!response.ok) {
       return res.status(response.status).send(`
         <!DOCTYPE html>
-        <html>
-        <head><meta charset="UTF-8"><style>body{background:#0a0d14;color:#9ca3af;font-family:sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;text-align:center;}</style></head>
+        <html lang="es">
+        <head><meta charset="UTF-8"><style>body{background:#080b11;color:#94a3b8;font-family:sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;text-align:center;}</style></head>
         <body>
           <div>
-            <h3 style="color:#ef4444;">⚠️ Señal no disponible en este servidor</h3>
-            <p>El servidor de transmisión respondió con error ${response.status}. Por favor selecciona otro canal o servidor.</p>
+            <h3 style="color:#ef4444;font-size:18px;">⚠️ Señal no disponible en este servidor</h3>
+            <p>El servidor de transmisión respondió con error ${response.status}. Por favor selecciona otro canal u opción.</p>
           </div>
         </body>
         </html>
@@ -507,7 +797,7 @@ app.get('/player/clean-embed', async (req, res) => {
     // 4. Remove any sandbox attribute on nested iframes
     html = html.replace(/\s*sandbox(?:="[^"]*")?/gi, '');
 
-    // 5. Inject base href and bulletproof security shield
+    // 5. Inject base href and bulletproof security shield with postMessage audio controls
     const baseTag = `<base href="${embedUrl}">`;
     const shieldInjection = `
       ${baseTag}
@@ -547,6 +837,56 @@ app.get('/player/clean-embed', async (req, res) => {
             return origReplace(url);
           };
         } catch(e) {}
+
+        // -------------------------------------------------------------
+        // Audio Control via postMessage from parent Multi-Stream Controller
+        // -------------------------------------------------------------
+        window.addEventListener('message', function(event) {
+          try {
+            const data = event.data;
+            if (!data || typeof data !== 'object') return;
+
+            if (data.type === 'SET_MUTE') {
+              const shouldMute = !!data.muted;
+              // 1. Mute/unmute all native media elements
+              document.querySelectorAll('video, audio').forEach(function(media) {
+                media.muted = shouldMute;
+                if (!shouldMute) {
+                  media.volume = 1;
+                  media.play().catch(function(){});
+                }
+              });
+
+              // 2. Control Clappr instance if present
+              if (window.player) {
+                if (shouldMute && window.player.mute) window.player.mute();
+                else if (!shouldMute) {
+                  if (window.player.unmute) window.player.unmute();
+                  if (window.player.setVolume) window.player.setVolume(100);
+                }
+              }
+
+              // 3. Control JWPlayer if present
+              if (window.jwplayer && typeof window.jwplayer === 'function') {
+                try { window.jwplayer().setMute(shouldMute); } catch(e){}
+              }
+            }
+          } catch(err) {
+            console.warn('postMessage audio error:', err);
+          }
+        });
+
+        // -------------------------------------------------------------
+        // Focus Notification: Notify parent when iframe is clicked/tapped
+        // -------------------------------------------------------------
+        function notifyParentSlotFocus() {
+          try {
+            window.parent.postMessage({ type: 'SLOT_FOCUSED', slotId: window.name }, '*');
+          } catch(e) {}
+        }
+        window.addEventListener('pointerdown', notifyParentSlotFocus, true);
+        window.addEventListener('click', notifyParentSlotFocus, true);
+
         // Auto-unmute helper if present
         document.addEventListener('DOMContentLoaded', () => {
           const unmute = document.getElementById('unmute') || document.getElementById('soundButton');
@@ -586,15 +926,15 @@ app.get('/player/clean-embed', async (req, res) => {
 app.get('/player/shield', (req, res) => {
   const embedUrl = req.query.url;
   const referer = req.query.referer || '';
-  if (!embedUrl) return res.status(400).send('Missing url parameter');
+  if (!embedUrl) return res.status(400).send('Parámetro url faltante');
   res.redirect(`/player/clean-embed?url=${encodeURIComponent(embedUrl)}&referer=${encodeURIComponent(referer)}`);
 });
 
-// Start server and initialize cache
-app.listen(PORT, async () => {
+// Start server listening on all network interfaces (0.0.0.0) for Wi-Fi LAN access
+app.listen(PORT, '0.0.0.0', async () => {
   console.log(`\n======================================================`);
-  console.log(`⚡ Capo Deportes / Pirlo Shield Server activo en http://localhost:${PORT}`);
-  console.log(`🛡️  Modo Seguro Activado: Sin anuncios, sin popups ni malware`);
+  console.log(`⚡ Capo Deportes / Pirlo Shield Server activo en http://0.0.0.0:${PORT}`);
+  console.log(`🛡️  Modo Seguro Activado: Sin anuncios, Anti-SSRF, Zero-RAM Stream`);
   console.log(`======================================================\n`);
   await refreshCache();
 });
