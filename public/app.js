@@ -17,7 +17,8 @@ function generateQRCodeSVG(text, size = 180) {
 }
 
 // --------------------------------------------------------------------------
-// Multi-Stream Slot Architecture
+// --------------------------------------------------------------------------
+// Multi-Stream Slot Architecture & Screen Fit Controller
 // --------------------------------------------------------------------------
 const SLOTS_COUNT = 4;
 let slots = [];
@@ -27,16 +28,58 @@ let allMatches = [];
 let allChannels = [];
 let lanNetworkInfo = { ip: '127.0.0.1', port: 3000, localUrl: 'http://localhost:3000' };
 
+// 3 Screen Fit Modes: contain, fill, cover
+const FIT_MODES = [
+  { key: 'contain', label: 'Ajustado (16:9 completo)' },
+  { key: 'fill', label: 'Estirado (Llenar bordes)' },
+  { key: 'cover', label: 'Zoom (Sin bordes negros)' }
+];
+let currentFitIndex = 0;
+
+function cycleScreenFit() {
+  currentFitIndex = (currentFitIndex + 1) % FIT_MODES.length;
+  const currentMode = FIT_MODES[currentFitIndex];
+
+  // Update button label
+  const labelEl = document.getElementById('aspectFitLabel');
+  if (labelEl) {
+    labelEl.textContent = currentMode.label;
+  }
+
+  // Apply to all native videos
+  slots.forEach(slot => {
+    if (slot.videoEl) {
+      slot.videoEl.style.objectFit = currentMode.key;
+    }
+    // Forward via postMessage to all active iframes
+    if (slot.iframeEl && slot.iframeEl.contentWindow) {
+      try {
+        slot.iframeEl.contentWindow.postMessage({
+          type: 'SET_FIT',
+          fit: currentMode.key
+        }, '*');
+      } catch (e) {}
+    }
+  });
+
+  console.log(`[Screen Fit] Modo aplicado: ${currentMode.label} (${currentMode.key})`);
+}
+
 // Initialize slot object references from DOM
 function initSlots() {
   slots = [];
   for (let i = 0; i < SLOTS_COUNT; i++) {
     const slotEl = document.getElementById(`slot-${i}`);
+    const iframeEl = slotEl.querySelector('.slot-iframe');
+    // Enforce strict native sandbox (0% popups, no escape)
+    if (iframeEl) {
+      iframeEl.setAttribute('sandbox', 'allow-scripts allow-same-origin allow-forms allow-presentation');
+    }
     slots.push({
       index: i,
       slotEl: slotEl,
       videoEl: slotEl.querySelector('.slot-video'),
-      iframeEl: slotEl.querySelector('.slot-iframe'),
+      iframeEl: iframeEl,
       titleEl: slotEl.querySelector('.slot-title'),
       serverSelect: slotEl.querySelector('.slot-server-select'),
       reloadBtn: slotEl.querySelector('.slot-reload-btn'),
@@ -274,6 +317,7 @@ function updateSlotServerSelect(slot, options, selectedIdx) {
 function setupSlotHls(slot, m3u8Url, referer) {
   slot.iframeEl.style.display = 'none';
   slot.videoEl.style.display = 'block';
+  slot.videoEl.style.objectFit = FIT_MODES[currentFitIndex].key;
 
   const proxiedM3u8 = `/api/stream/m3u8?url=${encodeURIComponent(m3u8Url)}&referer=${encodeURIComponent(referer || 'https://xstream.st/')}`;
 
@@ -349,20 +393,26 @@ function setupSlotEmbed(slot, embedUrl, referer) {
   slot.videoEl.style.display = 'none';
 
   slot.iframeEl.style.display = 'block';
+  // Strict native sandbox enforcement
+  slot.iframeEl.setAttribute('sandbox', 'allow-scripts allow-same-origin allow-forms allow-presentation');
   // Use sanitized clean-embed proxy
   slot.iframeEl.src = `/player/clean-embed?url=${encodeURIComponent(embedUrl)}&referer=${encodeURIComponent(referer || 'https://cdplay.live/')}`;
 
   slot.iframeEl.onload = () => {
     slot.loaderEl.style.display = 'none';
-    // Send postMessage mute status
+    // Send postMessage mute status and current screen fit
     setTimeout(() => {
       try {
         slot.iframeEl.contentWindow.postMessage({
           type: 'SET_MUTE',
           muted: (slot.index !== activeAudioSlotIndex)
         }, '*');
+        slot.iframeEl.contentWindow.postMessage({
+          type: 'SET_FIT',
+          fit: FIT_MODES[currentFitIndex].key
+        }, '*');
       } catch (e) {}
-    }, 500);
+    }, 400);
   };
 
   setTimeout(() => {
@@ -799,6 +849,14 @@ function setupNavigation() {
   document.getElementById('autoFastestBtn').onclick = () => {
     runAutoSpeedBenchmark(activeAudioSlotIndex);
   };
+
+  // Aspect fit button
+  const aspectFitBtn = document.getElementById('aspectFitBtn');
+  if (aspectFitBtn) {
+    aspectFitBtn.onclick = () => {
+      cycleScreenFit();
+    };
+  }
 
   // Theater & Fullscreen
   const theaterBtn = document.getElementById('theaterBtn');

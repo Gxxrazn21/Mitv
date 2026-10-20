@@ -87,11 +87,11 @@ body {
 .nav-container {
   max-width: 1440px;
   margin: 0 auto;
-  padding: 0.75rem 1.5rem;
+  padding: 0.45rem 1.25rem;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 1.5rem;
+  gap: 1.25rem;
 }
 
 .brand {
@@ -270,7 +270,7 @@ body {
 .status-strip {
   background: rgba(16, 185, 129, 0.08);
   border-bottom: 1px solid rgba(16, 185, 129, 0.2);
-  padding: 0.4rem 1.5rem;
+  padding: 0.25rem 1.25rem;
 }
 
 .status-strip-content {
@@ -279,7 +279,7 @@ body {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  font-size: 0.8rem;
+  font-size: 0.78rem;
 }
 
 .strip-left {
@@ -328,7 +328,7 @@ body {
 .main-layout {
   max-width: 1440px;
   margin: 0 auto;
-  padding: 1.5rem;
+  padding: 0.65rem 1.25rem;
   width: 100%;
   flex: 1;
 }
@@ -338,7 +338,7 @@ body {
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-lg);
   overflow: hidden;
-  margin-bottom: 2rem;
+  margin-bottom: 1rem;
   box-shadow: var(--shadow-card);
   transition: all 0.3s ease;
 }
@@ -356,15 +356,16 @@ body {
   flex-direction: column;
 }
 
+.player-header,
 .player-toolbar {
-  padding: 0.85rem 1.25rem;
+  padding: 0.45rem 1rem;
   background: var(--bg-card);
   border-bottom: 1px solid var(--border-subtle);
   display: flex;
   align-items: center;
   justify-content: space-between;
   flex-wrap: wrap;
-  gap: 1rem;
+  gap: 0.75rem;
 }
 
 .toolbar-left, .toolbar-right {
@@ -479,12 +480,34 @@ body {
   box-shadow: 0 0 14px var(--primary-glow);
 }
 
+.ctrl-btn-neutral {
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid var(--border-bright);
+  color: var(--text-main);
+  font-family: var(--font-body);
+  font-weight: 600;
+  font-size: 0.8rem;
+  padding: 0.4rem 0.85rem;
+  border-radius: var(--radius-full);
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  cursor: pointer;
+  transition: all 0.2s;
+  white-space: nowrap;
+}
+.ctrl-btn-neutral:hover {
+  background: rgba(255, 255, 255, 0.16);
+  border-color: var(--primary);
+  color: #fff;
+}
+
 .ctrl-icon-btn {
   background: var(--bg-card);
   border: 1px solid var(--border-subtle);
   color: var(--text-muted);
-  width: 36px;
-  height: 36px;
+  width: 34px;
+  height: 34px;
   border-radius: var(--radius-md);
   display: flex;
   align-items: center;
@@ -500,13 +523,16 @@ body {
 /* ==========================================================================
    Multi-Slot Video Grid & Neon Purple Audio Focus
    ========================================================================== */
+.video-wrapper,
 .video-grid {
-  display: grid;
   width: 100%;
+  max-height: calc(100dvh - 210px);
+  aspect-ratio: 16 / 9;
+  margin: 0 auto;
+  display: grid;
   background: #000;
-  min-height: 520px;
-  gap: 6px;
-  padding: 6px;
+  gap: 4px;
+  padding: 4px;
   box-sizing: border-box;
 }
 
@@ -514,6 +540,8 @@ body {
 .video-grid.layout-1 {
   grid-template-columns: 1fr;
   grid-template-rows: 1fr;
+  aspect-ratio: 16 / 9;
+  max-height: calc(100dvh - 210px);
 }
 .video-grid.layout-1 #slot-1,
 .video-grid.layout-1 #slot-2,
@@ -523,43 +551,44 @@ body {
 
 /* Layout 2: 2 pantallas (Split 50/50) */
 .video-grid.layout-2 {
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(2, 1fr);
   grid-template-rows: 1fr;
+  aspect-ratio: 16 / 9;
+  max-height: calc(100dvh - 210px);
 }
 .video-grid.layout-2 #slot-2,
 .video-grid.layout-2 #slot-3 {
   display: none !important;
 }
 
-/* Layout 3: 3 pantallas (1 grande, 2 a la derecha) */
-.video-grid.layout-3 {
-  grid-template-columns: 1.6fr 1fr;
-  grid-template-rows: 1fr 1fr;
-}
-.video-grid.layout-3 #slot-0 {
-  grid-row: span 2;
+/* Layout 3 y 4 pantallas (Quad 2x2) */
+.video-grid.layout-3,
+.video-grid.layout-4 {
+  grid-template-columns: repeat(2, 1fr);
+  grid-template-rows: repeat(2, 1fr);
+  height: calc(100dvh - 190px);
+  max-height: calc(100dvh - 190px);
+  aspect-ratio: unset;
 }
 .video-grid.layout-3 #slot-3 {
   display: none !important;
 }
 
-/* Layout 4: 4 pantallas (Quad 2x2) */
-.video-grid.layout-4 {
-  grid-template-columns: 1fr 1fr;
-  grid-template-rows: 1fr 1fr;
-}
-
 /* Stream Slot Container */
 .stream-slot {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  min-width: 0;
   position: relative;
+  overflow: hidden;
+  box-sizing: border-box;
   background: #04060a;
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-md);
-  overflow: hidden;
   display: flex;
   flex-direction: column;
   transition: border-color 0.2s ease, box-shadow 0.2s ease;
-  min-height: 250px;
 }
 
 /* ==========================================================================
@@ -567,7 +596,8 @@ body {
    ========================================================================== */
 .stream-slot.active-audio-slot {
   border: 3px solid #a855f7 !important;
-  box-shadow: 0 0 22px rgba(168, 85, 247, 0.65) !important;
+  box-shadow: inset 0 0 15px rgba(168, 85, 247, 0.5) !important;
+  box-sizing: border-box !important;
   z-index: 10;
 }
 
@@ -579,15 +609,16 @@ body {
   box-shadow: 0 0 8px rgba(168, 85, 247, 0.8);
 }
 
+.server-bar,
 .slot-header {
   background: rgba(15, 20, 34, 0.95);
-  padding: 0.45rem 0.75rem;
+  padding: 0.28rem 0.6rem;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 0.5rem;
+  gap: 0.4rem;
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-  font-size: 0.8rem;
+  font-size: 0.75rem;
   user-select: none;
 }
 
@@ -655,8 +686,10 @@ body {
   flex: 1;
   width: 100%;
   height: 100%;
-  min-height: 200px;
+  min-height: 0;
+  min-width: 0;
   background: #000;
+  overflow: hidden;
 }
 
 .slot-video, .slot-iframe {

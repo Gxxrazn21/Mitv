@@ -21,7 +21,7 @@
   <!-- HLS.js for direct video stream decoding -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/hls.js/1.5.7/hls.min.js"></script>
   
-  <link rel="stylesheet" href="app.css?v=3.0">
+  <link rel="stylesheet" href="app.css?v=3.1">
 </head>
 <body>
   <!-- Header / Navigation Bar -->
@@ -140,6 +140,12 @@
             <span>📱 Pasar al Teléfono</span>
           </button>
 
+          <!-- Aspect ratio / Screen fit button -->
+          <button id="aspectFitBtn" class="ctrl-btn-neutral" title="Ajuste de Pantalla: Ajustado (16:9) / Estirado / Zoom">
+            <span style="font-size:0.95rem;">📐</span>
+            <span id="aspectFitLabel">Ajustar Pantalla</span>
+          </button>
+
           <!-- Theater mode toggle -->
           <button id="theaterBtn" class="ctrl-icon-btn" title="Modo Teatro Ampliado">
             <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2">
@@ -176,7 +182,7 @@
           </div>
           <div class="slot-media-container">
             <video class="slot-video" playsinline controls preload="auto"></video>
-            <iframe class="slot-iframe" name="slot-0" allow="autoplay; fullscreen; encrypted-media; picture-in-picture" allowfullscreen="true"></iframe>
+            <iframe class="slot-iframe" id="shieldFrame" name="slot-0" sandbox="allow-scripts allow-same-origin allow-forms allow-presentation" allow="autoplay; fullscreen; encrypted-media; picture-in-picture" allowfullscreen="true"></iframe>
             <div class="slot-overlay slot-loader" style="display:none;">
               <div class="spinner"></div>
               <p class="loader-text">Sintonizando ranura 1...</p>
@@ -213,7 +219,7 @@
           </div>
           <div class="slot-media-container">
             <video class="slot-video" playsinline controls preload="auto"></video>
-            <iframe class="slot-iframe" name="slot-1" allow="autoplay; fullscreen; encrypted-media; picture-in-picture" allowfullscreen="true"></iframe>
+            <iframe class="slot-iframe" name="slot-1" sandbox="allow-scripts allow-same-origin allow-forms allow-presentation" allow="autoplay; fullscreen; encrypted-media; picture-in-picture" allowfullscreen="true"></iframe>
             <div class="slot-overlay slot-loader" style="display:none;">
               <div class="spinner"></div>
               <p class="loader-text">Sintonizando ranura 2...</p>
@@ -250,7 +256,7 @@
           </div>
           <div class="slot-media-container">
             <video class="slot-video" playsinline controls preload="auto"></video>
-            <iframe class="slot-iframe" name="slot-2" allow="autoplay; fullscreen; encrypted-media; picture-in-picture" allowfullscreen="true"></iframe>
+            <iframe class="slot-iframe" name="slot-2" sandbox="allow-scripts allow-same-origin allow-forms allow-presentation" allow="autoplay; fullscreen; encrypted-media; picture-in-picture" allowfullscreen="true"></iframe>
             <div class="slot-overlay slot-loader" style="display:none;">
               <div class="spinner"></div>
               <p class="loader-text">Sintonizando ranura 3...</p>
@@ -287,7 +293,7 @@
           </div>
           <div class="slot-media-container">
             <video class="slot-video" playsinline controls preload="auto"></video>
-            <iframe class="slot-iframe" name="slot-3" allow="autoplay; fullscreen; encrypted-media; picture-in-picture" allowfullscreen="true"></iframe>
+            <iframe class="slot-iframe" name="slot-3" sandbox="allow-scripts allow-same-origin allow-forms allow-presentation" allow="autoplay; fullscreen; encrypted-media; picture-in-picture" allowfullscreen="true"></iframe>
             <div class="slot-overlay slot-loader" style="display:none;">
               <div class="spinner"></div>
               <p class="loader-text">Sintonizando ranura 4...</p>
@@ -420,6 +426,6 @@
     </div>
   </footer>
 
-  <script src="app.js?v=3.0"></script>
+  <script src="app.js?v=3.1"></script>
 </body>
 </html>

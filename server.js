@@ -788,26 +788,66 @@ app.get('/player/clean-embed', async (req, res) => {
     html = html.replace(/<script[^>]*>[\s\S]*?location\[t\[5\]\]\s*=\s*["']\/block\.html["'][\s\S]*?<\/script>/gi, '');
     html = html.replace(/<script[^>]*>[\s\S]*?Sandbox not allowed[\s\S]*?<\/script>/gi, '');
 
-    // 3. Remove known ad networks & popunder scripts
+    // 3. Remove known ad networks & popunder script tags
     html = html.replace(/<script\s+type=["']text\/javascript["']\s+data-cfasync=["']false["']>[\s\S]*?<\/script>/gi, '');
-    html = html.replace(/<script[^>]*src=["'][^"']*(?:tag\.min\.js|aclib|waust|intellipopup|cloudfront|pa-H_qzm|histats|llvpn|r2\.dev)[^"']*["'][^>]*>[\s\S]*?<\/script>/gi, '');
+    html = html.replace(/<script[^>]*src=["'][^"']*(?:tag\.min\.js|aclib|waust|intellipopup|cloudfront|pa-H_qzm|histats|llvpn|r2\.dev|dtscout|popads|adcash|exoclick|juicyads|propeller)[^"']*["'][^>]*>[\s\S]*?<\/script>/gi, '');
     html = html.replace(/<script[^>]*id=["'](?:_wauksz|aclib)["']>[\s\S]*?<\/script>/gi, '');
     html = html.replace(/aclib\.runPop\([\s\S]*?\);?/gi, '');
 
-    // 4. Remove any sandbox attribute on nested iframes
-    html = html.replace(/\s*sandbox(?:="[^"]*")?/gi, '');
+    // 4. Strip inline scripts containing ad, tracker, popunder, and devtools blocking keywords
+    const AD_KEYWORDS = ['popunder', 'popads', 'aclib', 'histats', 'dtscout', 'clickable', 'adcash', 'exoclick', 'juicyads', 'propeller', 'bet365', '1xbet', 'onclick', 'onmousedown', 'window.open', 'devtools-detector', 'disable-devtool'];
+    html = html.replace(/<script\b[^>]*>([\s\S]*?)<\/script>/gi, (allScript, content) => {
+      const lower = content.toLowerCase();
+      if (AD_KEYWORDS.some(kw => lower.includes(kw))) {
+        return '<!-- blocked ad script -->';
+      }
+      return allScript;
+    });
 
-    // 5. Inject base href and bulletproof security shield with postMessage audio controls
+    // 5. Recursive iframe rewriting: route any nested iframes through /player/clean-embed with sandbox
+    html = html.replace(/<iframe\b([^>]*)\bsrc=["']([^"']+)["']([^>]*)>/gi, (match, prefix, srcUrl, suffix) => {
+      let resolved = srcUrl.trim();
+      if (resolved.startsWith('//')) {
+        resolved = 'https:' + resolved;
+      } else if (resolved.startsWith('/')) {
+        resolved = new URL(resolved, embedUrl).href;
+      } else if (!resolved.startsWith('http')) {
+        resolved = new URL(resolved, embedUrl).href;
+      }
+      const proxiedSrc = `/player/clean-embed?url=${encodeURIComponent(resolved)}&referer=${encodeURIComponent(embedUrl)}`;
+      return `<iframe ${prefix} src="${proxiedSrc}" sandbox="allow-scripts allow-same-origin allow-forms allow-presentation" ${suffix}>`;
+    });
+
+    // 6. Inject base href and bulletproof security shield with postMessage audio controls & MutationObserver
     const baseTag = `<base href="${embedUrl}">`;
     const shieldInjection = `
       ${baseTag}
       <script>
-        // Neutralize popups and alerts
-        window.open = function() { console.warn('🛡️ Shield: popup neutralizado'); return null; };
+        // -------------------------------------------------------------
+        // Anti-Popup & Action Neutralizer
+        // -------------------------------------------------------------
+        window.open = function() { console.warn('🛡️ Shield: window.open bloqueado'); return null; };
         window.alert = function() { return false; };
         window.confirm = function() { return false; };
+        window.prompt = function() { return null; };
         window.onbeforeunload = null;
+        try { HTMLAnchorElement.prototype.click = function() { console.warn('🛡️ Shield: click sintético bloqueado'); }; } catch(e){}
         try { Object.defineProperty(window, 'top', { get: () => window.self }); } catch(e){}
+
+        // Intercept addEventListener to drop click/pointer listeners using window.open or location redirects
+        try {
+          const origAddEventListener = EventTarget.prototype.addEventListener;
+          EventTarget.prototype.addEventListener = function(type, listener, options) {
+            if (['click', 'mousedown', 'mouseup', 'pointerdown', 'touchstart'].includes(type) && typeof listener === 'function') {
+              const fnStr = listener.toString();
+              if (fnStr.includes('window.open') || fnStr.includes('location') || fnStr.includes('createElement("a")') || fnStr.includes("createElement('a')")) {
+                console.warn('🛡️ Shield: Listener malicioso bloqueado:', type);
+                return;
+              }
+            }
+            return origAddEventListener.call(this, type, listener, options);
+          };
+        } catch(e) {}
 
         // Neutralize anti-sandbox detection (emulate non-sandboxed frameElement)
         try {
@@ -839,16 +879,80 @@ app.get('/player/clean-embed', async (req, res) => {
         } catch(e) {}
 
         // -------------------------------------------------------------
-        // Audio Control via postMessage from parent Multi-Stream Controller
+        // MutationObserver: Anti-Invisible Overlays & Ad Injector Blocker
+        // -------------------------------------------------------------
+        const adKeywords = ['popunder', 'popads', 'aclib', 'histats', 'dtscout', 'clickable', 'adcash', 'exoclick', 'juicyads', 'propeller', 'bet365', '1xbet', 'tag.min.js', 'llvpn', 'window.open', 'onclick', 'onmousedown'];
+        function sweepOverlays() {
+          try {
+            document.querySelectorAll('a').forEach(a => a.remove());
+            document.querySelectorAll('div').forEach(node => {
+              try {
+                const style = window.getComputedStyle(node);
+                const zIndex = parseInt(style.zIndex, 10);
+                if ((style.position === 'fixed' || style.position === 'absolute') && zIndex > 1000) {
+                  if (!node.querySelector('video, #player, #clappr, .player-poster, .shaka-video-container, [data-player]') && !node.id.includes('player') && !node.id.includes('clappr')) {
+                    node.remove();
+                  }
+                }
+              } catch(e){}
+            });
+          } catch(e){}
+        }
+        sweepOverlays();
+        document.addEventListener('DOMContentLoaded', sweepOverlays);
+
+        const observer = new MutationObserver((mutations) => {
+          for (const m of mutations) {
+            for (const node of m.addedNodes) {
+              if (node.nodeType !== 1) continue;
+              // 1. Immediately remove ANY anchor tag (clickjackers)
+              if (node.tagName === 'A') {
+                node.remove();
+                continue;
+              }
+              // 2. Remove ad script injections
+              if (node.tagName === 'SCRIPT') {
+                const src = (node.src || '').toLowerCase();
+                const text = (node.textContent || '').toLowerCase();
+                if (adKeywords.some(kw => src.includes(kw) || text.includes(kw))) {
+                  node.remove();
+                  continue;
+                }
+              }
+              // 3. Ensure any dynamically inserted iframe goes through clean-embed
+              if (node.tagName === 'IFRAME') {
+                if (node.src && !node.src.includes('/player/clean-embed') && !node.src.startsWith('about:')) {
+                  node.src = '/player/clean-embed?url=' + encodeURIComponent(node.src) + '&referer=' + encodeURIComponent(window.location.href);
+                }
+              }
+              // 4. Remove floating overlay divs with high z-index that don't contain video or player controls
+              if (node.tagName === 'DIV') {
+                try {
+                  const style = window.getComputedStyle(node);
+                  const zIndex = parseInt(style.zIndex, 10);
+                  if ((style.position === 'fixed' || style.position === 'absolute') && zIndex > 1000) {
+                    if (!node.querySelector('video, #player, #clappr, .player-poster, .shaka-video-container, [data-player]') && !node.id.includes('player') && !node.id.includes('clappr')) {
+                      node.remove();
+                    }
+                  }
+                } catch(e) {}
+              }
+            }
+          }
+        });
+        observer.observe(document.documentElement, { childList: true, subtree: true });
+
+        // -------------------------------------------------------------
+        // Audio & Video Fit Control via postMessage
         // -------------------------------------------------------------
         window.addEventListener('message', function(event) {
           try {
             const data = event.data;
             if (!data || typeof data !== 'object') return;
 
+            // Audio mute/unmute
             if (data.type === 'SET_MUTE') {
               const shouldMute = !!data.muted;
-              // 1. Mute/unmute all native media elements
               document.querySelectorAll('video, audio').forEach(function(media) {
                 media.muted = shouldMute;
                 if (!shouldMute) {
@@ -857,7 +961,6 @@ app.get('/player/clean-embed', async (req, res) => {
                 }
               });
 
-              // 2. Control Clappr instance if present
               if (window.player) {
                 if (shouldMute && window.player.mute) window.player.mute();
                 else if (!shouldMute) {
@@ -866,19 +969,24 @@ app.get('/player/clean-embed', async (req, res) => {
                 }
               }
 
-              // 3. Control JWPlayer if present
               if (window.jwplayer && typeof window.jwplayer === 'function') {
                 try { window.jwplayer().setMute(shouldMute); } catch(e){}
               }
             }
+
+            // Aspect ratio / object-fit control
+            if (data.type === 'SET_FIT') {
+              const fitVal = data.fit || 'contain';
+              document.querySelectorAll('video, #player, #clappr, .player-poster, .shaka-video-container, [data-player]').forEach(function(el) {
+                el.style.setProperty('object-fit', fitVal, 'important');
+              });
+            }
           } catch(err) {
-            console.warn('postMessage audio error:', err);
+            console.warn('postMessage handler error:', err);
           }
         });
 
-        // -------------------------------------------------------------
         // Focus Notification: Notify parent when iframe is clicked/tapped
-        // -------------------------------------------------------------
         function notifyParentSlotFocus() {
           try {
             window.parent.postMessage({ type: 'SLOT_FOCUSED', slotId: window.name }, '*');
@@ -899,10 +1007,26 @@ app.get('/player/clean-embed', async (req, res) => {
       </script>
       <style>
         * { box-sizing: border-box; }
-        html, body { width: 100%; height: 100%; margin: 0; padding: 0; background: #000; overflow: hidden; }
-        a[target="_blank"] { pointer-events: none !important; }
+        html, body {
+          width: 100vw !important;
+          height: 100vh !important;
+          margin: 0 !important;
+          padding: 0 !important;
+          overflow: hidden !important;
+          background: #000 !important;
+        }
+        video, #player, #clappr, .player-poster, .shaka-video-container, [data-player] {
+          width: 100vw !important;
+          height: 100vh !important;
+          max-width: 100vw !important;
+          max-height: 100vh !important;
+          position: fixed !important;
+          inset: 0 !important;
+          object-fit: contain !important;
+        }
+        a[target="_blank"], a { pointer-events: none !important; }
         div[style*="z-index: 2147483647"], div[style*="z-index:999999"], div[class*="banner"] { display: none !important; }
-        #unmute { cursor: pointer; user-select: none; }
+        #unmute { cursor: pointer; user-select: none; z-index: 99999 !important; }
       </style>
     `;
 

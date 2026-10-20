@@ -1,10 +1,10 @@
 // Pirlo Shield Service Worker for Mobile PWA
-const CACHE_NAME = 'pirlo-shield-v1';
+const CACHE_NAME = 'pirlo-shield-v2';
 const STATIC_ASSETS = [
   '/',
   '/index.html',
-  '/app.css?v=3.0',
-  '/app.js?v=3.0',
+  '/app.css?v=3.1',
+  '/app.js?v=3.1',
   '/manifest.json'
 ];
 
@@ -40,9 +40,25 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
+  // Network-First for HTML/Navigation so updates are immediately visible
+  if (event.request.mode === 'navigate' || event.request.headers.get('accept')?.includes('text/html')) {
+    event.respondWith(
+      fetch(event.request)
+        .then((response) => {
+          const clone = response.clone();
+          caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
+          return response;
+        })
+        .catch(() => caches.match(event.request))
+    );
+    return;
+  }
+
   event.respondWith(
     caches.match(event.request).then((cachedResponse) => {
-      return cachedResponse || fetch(event.request).catch(() => cachedResponse);
+      return cachedResponse || fetch(event.request).then((networkRes) => {
+        return networkRes;
+      }).catch(() => cachedResponse);
     })
   );
 });
