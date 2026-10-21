@@ -1,23 +1,15 @@
 /**
- * MiTV — BROADCAST CLIENT APPLICATION
- * Native Dual-Engine Video Player (HLS.js + Shaka Player DASH / ClearKey DRM)
- * Multi-Stream (1, 2, 4 Screens), Exclusive Purple Audio Focus,
- * 40px Server Options Bar with Auto-Fastest Benchmark & LAN Mobile Handoff.
+ * MiTV — APPLE TV / YOUTUBE TV DARK CLIENT APPLICATION
+ * Dual-Engine Streaming Controller (HLS.js + Sandboxed Isolated Clean-Embed),
+ * Multi-Stream (1, 2, 4 Slots), Purple Audio Focus, Retractable Sidebar,
+ * Parallel Latency Benchmarking & Mobile LAN Handoff.
  */
 
-// Install Shaka Player polyfills once
-if (window.shaka) {
-  shaka.polyfill.installAll();
-}
-
-// --------------------------------------------------------------------------
-// State & Configuration
-// --------------------------------------------------------------------------
 const SLOTS_COUNT = 4;
 let slots = [];
-let activeAudioSlotIndex = 0; // Default slot 0 with purple audio focus
-let currentLayout = '1';      // '1', '2', '4'
-let currentTab = 'matches';   // 'matches' | 'channels'
+let focusedSlotIdx = 0;   // Default Slot 0 has purple outline and active audio
+let currentLayout = '1';  // '1' | '2' | '4'
+let currentTab = 'matches';
 let currentFilter = 'all';
 let searchQuery = '';
 
@@ -31,7 +23,7 @@ const FIT_MODES = [
   { key: 'fill', label: 'Llenar' },
   { key: 'cover', label: 'Zoom' }
 ];
-let currentFitIndex = 0;
+let currentFitIdx = 0;
 
 // --------------------------------------------------------------------------
 // Initialization
@@ -41,55 +33,55 @@ document.addEventListener('DOMContentLoaded', async () => {
   setupUIEventListeners();
   setupKeyboardShortcuts();
 
-  // Load initial data
   await Promise.all([
     fetchSchedule(),
     fetchChannels(),
     fetchNetworkInfo()
   ]);
 
-  // If matches exist, auto-tune the first one into slot 0
+  // Auto-tune first match in Slot 0
   if (allMatches.length > 0) {
     loadStreamInSlot(0, allMatches[0], 0);
   }
 });
 
 // --------------------------------------------------------------------------
-// Multi-Stream Slots Setup
+// Slots Setup
 // --------------------------------------------------------------------------
 function initSlots() {
   slots = [];
   for (let i = 0; i < SLOTS_COUNT; i++) {
     const slotEl = document.getElementById(`slot-${i}`);
     const videoEl = slotEl.querySelector('.slot-video');
+    const iframeEl = slotEl.querySelector('.slot-iframe');
 
     slots.push({
       index: i,
       slotEl,
       videoEl,
+      iframeEl,
       titleEl: slotEl.querySelector('.slot-title'),
       loaderEl: slotEl.querySelector('.slot-loader'),
-      loaderMsg: slotEl.querySelector('.loader-msg'),
+      loaderText: slotEl.querySelector('.loader-text'),
       errorEl: slotEl.querySelector('.slot-error'),
-      errorMsg: slotEl.querySelector('.error-msg'),
+      errorText: slotEl.querySelector('.error-text'),
       emptyEl: slotEl.querySelector('.slot-empty'),
-      reloadBtn: slotEl.querySelector('.slot-reload-btn'),
-      closeBtn: slotEl.querySelector('.slot-close-btn'),
+      reloadBtn: slotEl.querySelector('.slot-reload'),
+      closeBtn: slotEl.querySelector('.slot-close'),
       retryBtn: slotEl.querySelector('.slot-retry-btn'),
       hlsInstance: null,
-      shakaInstance: null,
       currentMatch: null,
       currentOptionIdx: 0,
-      mode: 'idle' // 'hls' | 'dash' | 'idle'
+      mode: 'idle' // 'hls' | 'embed' | 'idle'
     });
   }
 
   // Bind slot interactions
   slots.forEach(slot => {
-    // Clicking anywhere on a slot selects it as the active audio slot
+    // Clicking slot selects it as the active audio slot
     slot.slotEl.addEventListener('click', (e) => {
-      if (e.target.tagName !== 'BUTTON' && !e.target.closest('.slot-controls')) {
-        setActiveAudioSlot(slot.index);
+      if (!e.target.closest('.slot-actions') && e.target.tagName !== 'BUTTON') {
+        setFocusedSlot(slot.index);
       }
     });
 
@@ -107,7 +99,7 @@ function initSlots() {
       clearSlot(slot.index);
     });
 
-    // Retry button
+    // Retry button on error
     slot.retryBtn.addEventListener('click', (e) => {
       e.stopPropagation();
       if (slot.currentMatch) {
@@ -116,50 +108,84 @@ function initSlots() {
       }
     });
 
-    // Video events
+    // Video play events
     slot.videoEl.addEventListener('playing', () => {
       slot.loaderEl.style.display = 'none';
       slot.errorEl.style.display = 'none';
       slot.emptyEl.style.display = 'none';
     });
 
-    slot.videoEl.addEventListener('waiting', () => {
-      // Slot buffering
+    // Iframe load event
+    slot.iframeEl.addEventListener('load', () => {
+      if (slot.mode === 'embed' && slot.iframeEl.src !== 'about:blank') {
+        slot.loaderEl.style.display = 'none';
+        slot.errorEl.style.display = 'none';
+        slot.emptyEl.style.display = 'none';
+      }
     });
   });
 }
 
 // --------------------------------------------------------------------------
-// Purple Audio Focus Controller
+// Purple Audio Focus & Recuadro Morado
 // --------------------------------------------------------------------------
-function setActiveAudioSlot(targetSlotIndex) {
-  if (targetSlotIndex < 0 || targetSlotIndex >= SLOTS_COUNT) return;
-  activeAudioSlotIndex = targetSlotIndex;
+function setFocusedSlot(targetIdx) {
+  if (targetIdx < 0 || targetIdx >= SLOTS_COUNT) return;
+  focusedSlotIdx = targetIdx;
 
   slots.forEach(slot => {
-    const isActive = (slot.index === targetSlotIndex);
+    const isFocused = (slot.index === targetIdx);
 
-    // Apply or remove purple outline class
-    slot.slotEl.classList.toggle('active-audio-slot', isActive);
+    // Purple outline & glow
+    slot.slotEl.classList.toggle('active-audio', isFocused);
 
-    // Strict Audio Muting: ONLY active slot has muted = false
-    if (slot.videoEl) {
-      if (isActive) {
+    // Audio Muting Logic: ONLY focused slot produces sound
+    if (slot.mode === 'hls' && slot.videoEl) {
+      if (isFocused) {
         slot.videoEl.muted = false;
         slot.videoEl.volume = 1;
         slot.videoEl.play().catch(() => {});
       } else {
         slot.videoEl.muted = true;
       }
+    } else if (slot.mode === 'embed' && slot.iframeEl && slot.iframeEl.contentWindow) {
+      try {
+        slot.iframeEl.contentWindow.postMessage({
+          type: 'SET_MUTE',
+          muted: !isFocused
+        }, '*');
+      } catch (e) {}
     }
   });
 
-  // Update bottom server options bar for the newly selected slot
-  renderActiveServersBar();
+  // Update Footer UI
+  const pill = document.getElementById('focusedSlotPill');
+  if (pill) {
+    pill.textContent = `Pantalla ${targetIdx + 1} · Audio Activo`;
+  }
 
-  // Update sidebar active highlights
+  // Update Server Chips for focused slot
+  renderStageFooterServerChips();
+
+  // Update Header title
+  updateHeaderTitle();
+
+  // Highlight active match in sidebar
   highlightActiveMatchInSidebar();
 }
+
+// Listen for messages from sandboxed iframes
+window.addEventListener('message', (event) => {
+  if (event.data && event.data.type === 'SLOT_CLICKED') {
+    const slotName = event.data.slotName; // e.g. 'slot-1'
+    if (typeof slotName === 'string' && slotName.startsWith('slot-')) {
+      const idx = parseInt(slotName.replace('slot-', ''), 10);
+      if (!isNaN(idx)) {
+        setFocusedSlot(idx);
+      }
+    }
+  }
+});
 
 // --------------------------------------------------------------------------
 // Multi-Stream Layout Selector ([1], [2], [4])
@@ -169,153 +195,167 @@ function setLayout(layoutNum) {
   const videoGrid = document.getElementById('videoGrid');
   videoGrid.className = `video-grid layout-${currentLayout}`;
 
-  // Update layout buttons UI
-  document.querySelectorAll('.grid-btn').forEach(btn => {
+  // Update segmented control buttons
+  document.querySelectorAll('#layoutSelector .seg-btn').forEach(btn => {
     btn.classList.toggle('active', btn.getAttribute('data-layout') === currentLayout);
   });
 
-  // Ensure active audio slot is visible in this layout
-  const maxVisibleSlots = parseInt(currentLayout, 10);
-  if (activeAudioSlotIndex >= maxVisibleSlots) {
-    setActiveAudioSlot(0);
+  // Ensure focused slot is visible in this layout
+  const maxVisible = parseInt(currentLayout, 10);
+  if (focusedSlotIdx >= maxVisible) {
+    setFocusedSlot(0);
   }
 }
 
 // --------------------------------------------------------------------------
-// Video Aspect Ratio Fit Controller (16:9 / Llenar / Zoom)
+// Aspect Fit Controller (16:9 / Llenar / Zoom)
 // --------------------------------------------------------------------------
 function cycleScreenFit() {
-  currentFitIndex = (currentFitIndex + 1) % FIT_MODES.length;
-  const currentMode = FIT_MODES[currentFitIndex];
+  currentFitIdx = (currentFitIdx + 1) % FIT_MODES.length;
+  const mode = FIT_MODES[currentFitIdx];
 
-  const labelEl = document.getElementById('aspectFitLabel');
-  if (labelEl) {
-    labelEl.textContent = currentMode.label;
+  const label = document.getElementById('aspectFitLabel');
+  if (label) {
+    label.textContent = mode.label;
   }
 
-  // Apply object-fit to all native video elements
+  // Apply to all video elements
   slots.forEach(slot => {
     if (slot.videoEl) {
-      slot.videoEl.style.objectFit = currentMode.key;
+      slot.videoEl.style.objectFit = mode.key;
+    }
+    if (slot.iframeEl && slot.iframeEl.contentWindow) {
+      try {
+        slot.iframeEl.contentWindow.postMessage({
+          type: 'SET_FIT',
+          fit: mode.key
+        }, '*');
+      } catch (e) {}
     }
   });
 }
 
 // --------------------------------------------------------------------------
-// Native Streaming Engine per Slot (HLS.js & Shaka Player DASH)
+// Dual-Engine Stream Loader & Teardown
 // --------------------------------------------------------------------------
-async function clearSlot(slotIndex) {
-  const slot = slots[slotIndex];
+function clearSlot(slotIdx) {
+  const slot = slots[slotIdx];
   if (!slot) return;
 
   if (slot.hlsInstance) {
     slot.hlsInstance.destroy();
     slot.hlsInstance = null;
   }
-  if (slot.shakaInstance) {
-    await slot.shakaInstance.destroy().catch(() => {});
-    slot.shakaInstance = null;
-  }
 
   slot.videoEl.pause();
   slot.videoEl.removeAttribute('src');
   slot.videoEl.load();
+  slot.videoEl.style.display = 'none';
+
+  slot.iframeEl.src = 'about:blank';
+  slot.iframeEl.style.display = 'none';
 
   slot.currentMatch = null;
   slot.currentOptionIdx = 0;
   slot.mode = 'idle';
 
-  slot.titleEl.textContent = `Ranura ${slotIndex + 1}: Vacía`;
+  slot.titleEl.textContent = `Ranura ${slotIdx + 1}`;
   slot.loaderEl.style.display = 'none';
   slot.errorEl.style.display = 'none';
   slot.emptyEl.style.display = 'flex';
 
-  if (activeAudioSlotIndex === slotIndex) {
-    renderActiveServersBar();
+  if (focusedSlotIdx === slotIdx) {
+    renderStageFooterServerChips();
+    updateHeaderTitle();
   }
 }
 
-async function loadStreamInSlot(slotIndex, matchData, optionIndex = 0) {
-  const slot = slots[slotIndex];
+async function loadStreamInSlot(slotIdx, matchData, optionIndex = 0) {
+  const slot = slots[slotIdx];
   if (!slot || !matchData || !matchData.options) return;
 
   const option = matchData.options[optionIndex] || matchData.options[0];
   if (!option) return;
 
-  // Clean teardown of prior stream in this slot
+  // Clean prior player in this slot
   if (slot.hlsInstance) {
     slot.hlsInstance.destroy();
     slot.hlsInstance = null;
   }
-  if (slot.shakaInstance) {
-    await slot.shakaInstance.destroy().catch(() => {});
-    slot.shakaInstance = null;
-  }
-
   slot.videoEl.pause();
   slot.videoEl.removeAttribute('src');
   slot.videoEl.load();
+  slot.iframeEl.src = 'about:blank';
 
   slot.currentMatch = matchData;
   slot.currentOptionIdx = optionIndex;
   slot.emptyEl.style.display = 'none';
   slot.errorEl.style.display = 'none';
-  slot.loaderMsg.textContent = `Sintonizando ${option.name}...`;
+  slot.loaderText.textContent = `Sintonizando ${option.name}...`;
   slot.loaderEl.style.display = 'flex';
-  slot.titleEl.textContent = `${slotIndex + 1}. ${matchData.title || matchData.name} (${option.name})`;
+  slot.titleEl.textContent = `${slotIdx + 1}. ${matchData.title || matchData.name} (${option.name})`;
 
-  // Ensure this slot is selected with purple audio focus
-  setActiveAudioSlot(slotIndex);
+  // Set focused slot
+  setFocusedSlot(slotIdx);
 
   try {
     const resolveRes = await fetch(`/api/resolve?url=${encodeURIComponent(option.url)}`);
     const result = await resolveRes.json();
 
-    if (!result.ok || !result.streamUrls || result.streamUrls.length === 0) {
-      throw new Error(result.error || 'No se pudo extraer el stream de video');
+    if (!result.ok) {
+      throw new Error(result.error || 'No se pudo resolver el stream');
     }
 
-    const rawStreamUrl = result.streamUrls[0];
-    const referer = result.referer || 'https://xstream.st/';
-
-    if (result.mode === 'dash') {
-      slot.mode = 'dash';
-      await setupSlotDash(slot, rawStreamUrl, result.clearKeys);
-    } else {
+    if (result.mode === 'hls' && result.streamUrls && result.streamUrls.length > 0) {
       slot.mode = 'hls';
-      setupSlotHls(slot, rawStreamUrl, referer);
+      setupSlotHls(slot, result.streamUrls[0], result.referer);
+    } else if (result.mode === 'embed' && result.embedUrl) {
+      slot.mode = 'embed';
+      setupSlotEmbed(slot, result.embedUrl);
+    } else {
+      throw new Error('Señal no reproducible en esta opción');
     }
   } catch (err) {
-    console.error(`Slot ${slotIndex} playback error:`, err);
+    console.warn(`Slot ${slotIdx} error:`, err);
+    // Automatic fallback to next option if available
+    if (matchData.options.length > 1 && optionIndex + 1 < matchData.options.length) {
+      console.log(`[Auto-Fallback] Probando siguiente opción para slot ${slotIdx}...`);
+      loadStreamInSlot(slotIdx, matchData, optionIndex + 1);
+      return;
+    }
+
     slot.loaderEl.style.display = 'none';
-    slot.errorMsg.textContent = err.message || 'Error al conectar con la señal';
+    slot.errorText.textContent = err.message || 'Error al conectar';
     slot.errorEl.style.display = 'flex';
   }
 }
 
-// --------------------------------------------------------------------------
-// HLS Setup (Hls.js + Safari Native Fallback)
-// --------------------------------------------------------------------------
+// HLS.js Setup for Native Video
 function setupSlotHls(slot, streamUrl, referer) {
-  // Always proxy HLS manifest through /api/stream/m3u8 to guarantee correct Referer & Zero-RAM chunk piping
-  const proxiedManifestUrl = `/api/stream/m3u8?url=${encodeURIComponent(streamUrl)}&referer=${encodeURIComponent(referer)}`;
+  slot.iframeEl.style.display = 'none';
+  slot.videoEl.style.display = 'block';
+
+  // Apply current object-fit
+  const currentFit = FIT_MODES[currentFitIdx].key;
+  slot.videoEl.style.objectFit = currentFit;
+
+  // Use playlist proxy with full URL resolution
+  const proxiedM3u8 = `/api/stream/m3u8?url=${encodeURIComponent(streamUrl)}&referer=${encodeURIComponent(referer || 'https://xstream.st/')}`;
 
   if (Hls.isSupported()) {
     const hls = new Hls({
       enableWorker: true,
       lowLatencyMode: true,
       backBufferLength: 30,
-      maxBufferLength: 20,
-      maxMaxBufferLength: 40,
-      liveSyncDurationCount: 3,
-      liveMaxLatencyDurationCount: 6
+      maxBufferLength: 20
     });
 
     slot.hlsInstance = hls;
-    hls.loadSource(proxiedManifestUrl);
+    hls.loadSource(proxiedM3u8);
     hls.attachMedia(slot.videoEl);
 
     hls.on(Hls.Events.MANIFEST_PARSED, () => {
+      slot.videoEl.muted = (slot.index !== focusedSlotIdx);
       slot.videoEl.play().catch(() => {});
     });
 
@@ -330,142 +370,140 @@ function setupSlotHls(slot, streamUrl, referer) {
             break;
           default:
             hls.destroy();
-            slot.loaderEl.style.display = 'none';
-            slot.errorMsg.textContent = 'Error fatal de transmisión HLS';
-            slot.errorEl.style.display = 'flex';
+            // Try next option automatically
+            if (slot.currentMatch && slot.currentOptionIdx + 1 < slot.currentMatch.options.length) {
+              loadStreamInSlot(slot.index, slot.currentMatch, slot.currentOptionIdx + 1);
+            } else {
+              slot.loaderEl.style.display = 'none';
+              slot.errorText.textContent = 'Error fatal de stream';
+              slot.errorEl.style.display = 'flex';
+            }
             break;
         }
       }
     });
   } else if (slot.videoEl.canPlayType('application/vnd.apple.mpegurl')) {
-    // Safari Native HLS
-    slot.videoEl.src = proxiedManifestUrl;
+    slot.videoEl.src = proxiedM3u8;
+    slot.videoEl.muted = (slot.index !== focusedSlotIdx);
     slot.videoEl.play().catch(() => {});
   } else {
     slot.loaderEl.style.display = 'none';
-    slot.errorMsg.textContent = 'HLS no soportado en este navegador';
+    slot.errorText.textContent = 'Navegador no compatible con HLS';
     slot.errorEl.style.display = 'flex';
   }
 }
 
-// --------------------------------------------------------------------------
-// DASH Setup (Shaka Player + ClearKey DRM)
-// --------------------------------------------------------------------------
-async function setupSlotDash(slot, streamUrl, clearKeys) {
-  if (!window.shaka || !shaka.Player.isBrowserSupported()) {
-    throw new Error('Shaka Player DASH no compatible');
-  }
+// Sandboxed Clean-Embed Setup for DRM / Shaka Player pages
+function setupSlotEmbed(slot, embedUrl) {
+  slot.videoEl.pause();
+  slot.videoEl.style.display = 'none';
+  slot.iframeEl.style.display = 'block';
 
-  const player = new shaka.Player(slot.videoEl);
-  slot.shakaInstance = player;
+  slot.iframeEl.src = embedUrl;
 
-  // Configure ClearKey DRM if keys extracted
-  if (clearKeys && Object.keys(clearKeys).length > 0) {
-    player.configure({
-      drm: {
-        clearKeys: clearKeys
-      }
-    });
-  }
-
-  player.configure({
-    streaming: {
-      bufferingGoal: 10,
-      rebufferingGoal: 2,
-      lowLatencyMode: true
-    }
-  });
-
-  player.addEventListener('error', (event) => {
-    console.error('Shaka error:', event.detail);
+  slot.iframeEl.onload = () => {
     slot.loaderEl.style.display = 'none';
-    slot.errorMsg.textContent = 'Error en flujo DASH';
-    slot.errorEl.style.display = 'flex';
-  });
+    // Send mute state to iframe
+    try {
+      slot.iframeEl.contentWindow.postMessage({
+        type: 'SET_MUTE',
+        muted: (slot.index !== focusedSlotIdx)
+      }, '*');
 
-  await player.load(streamUrl);
-  slot.videoEl.play().catch(() => {});
+      const currentFit = FIT_MODES[currentFitIdx].key;
+      slot.iframeEl.contentWindow.postMessage({
+        type: 'SET_FIT',
+        fit: currentFit
+      }, '*');
+    } catch (e) {}
+  };
 }
 
 // --------------------------------------------------------------------------
-// Discrete 40px Active Servers Bar & Speed Benchmark
+// Stage Footer Server Chips & Auto-Fastest
 // --------------------------------------------------------------------------
-function renderActiveServersBar() {
-  const activeSlot = slots[activeAudioSlotIndex];
-  const nameEl = document.getElementById('activeMatchName');
-  const listEl = document.getElementById('serverOptionsList');
+function renderStageFooterServerChips() {
+  const container = document.getElementById('serverChipsList');
+  const focusedSlot = slots[focusedSlotIdx];
 
-  if (!activeSlot || !activeSlot.currentMatch) {
-    nameEl.textContent = 'Ningún evento seleccionado';
-    listEl.innerHTML = '<span style="color:#64748b; font-size:11px;">Elige un partido en el panel derecho</span>';
+  if (!focusedSlot || !focusedSlot.currentMatch) {
+    container.innerHTML = '<span class="no-options-hint">Selecciona un evento para ver servidores</span>';
     return;
   }
 
-  const match = activeSlot.currentMatch;
-  nameEl.textContent = match.title || match.name;
-  listEl.innerHTML = '';
+  const match = focusedSlot.currentMatch;
+  container.innerHTML = '';
 
   match.options.forEach((opt, idx) => {
-    const btn = document.createElement('button');
-    btn.className = `server-btn ${idx === activeSlot.currentOptionIdx ? 'active' : ''}`;
-    btn.innerHTML = `<span>${opt.name}</span>`;
+    const chip = document.createElement('button');
+    chip.className = `server-chip ${idx === focusedSlot.currentOptionIdx ? 'active' : ''}`;
+    chip.innerHTML = `<span>${opt.name}</span>`;
 
-    btn.addEventListener('click', () => {
-      loadStreamInSlot(activeAudioSlotIndex, match, idx);
+    chip.addEventListener('click', () => {
+      loadStreamInSlot(focusedSlotIdx, match, idx);
     });
 
-    listEl.appendChild(btn);
+    container.appendChild(chip);
   });
 }
 
-// Probing fastest server with real latency measurement
-async function probeFastestForActiveSlot() {
-  const activeSlot = slots[activeAudioSlotIndex];
-  if (!activeSlot || !activeSlot.currentMatch) return;
+async function probeFastestForFocusedSlot() {
+  const focusedSlot = slots[focusedSlotIdx];
+  if (!focusedSlot || !focusedSlot.currentMatch) return;
 
-  const probeBtn = document.getElementById('probeFastestBtn');
-  const originalText = probeBtn.innerHTML;
-  probeBtn.disabled = true;
-  probeBtn.innerHTML = `<span>Sondeando...</span>`;
+  const btn = document.getElementById('autoFastestBtn');
+  const originalHtml = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = '<span>⚡ Sondeando...</span>';
 
   try {
     const res = await fetch('/api/probe-fastest', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ options: activeSlot.currentMatch.options })
+      body: JSON.stringify({ options: focusedSlot.currentMatch.options })
     });
     const data = await res.json();
 
     if (data.ok && Array.isArray(data.ranked) && data.ranked.length > 0) {
       const best = data.ranked.find(r => r.available) || data.ranked[0];
 
-      // Auto-tune the fastest option
-      loadStreamInSlot(activeAudioSlotIndex, activeSlot.currentMatch, best.index);
+      // Auto-tune into fastest option
+      loadStreamInSlot(focusedSlotIdx, focusedSlot.currentMatch, best.index);
 
-      // Re-render server pills with measured latencies
-      const listEl = document.getElementById('serverOptionsList');
-      listEl.innerHTML = '';
-      data.ranked.forEach((r) => {
-        const btn = document.createElement('button');
-        btn.className = `server-btn ${r.index === best.index ? 'active' : ''}`;
+      // Re-render chips with latencies
+      const container = document.getElementById('serverChipsList');
+      container.innerHTML = '';
+      data.ranked.forEach(r => {
+        const chip = document.createElement('button');
+        chip.className = `server-chip ${r.index === best.index ? 'active' : ''}`;
         const latencyText = r.available ? `${r.latencyMs}ms` : 'Offline';
         const latencyColor = r.available ? (r.latencyMs < 200 ? '#10b981' : '#f59e0b') : '#ef4444';
 
-        btn.innerHTML = `
+        chip.innerHTML = `
           <span>${r.name}</span>
-          <span class="latency-tag" style="color:${latencyColor}">(${latencyText})</span>
+          <span class="latency-pill" style="color:${latencyColor}">(${latencyText})</span>
         `;
-        btn.addEventListener('click', () => {
-          loadStreamInSlot(activeAudioSlotIndex, activeSlot.currentMatch, r.index);
+        chip.addEventListener('click', () => {
+          loadStreamInSlot(focusedSlotIdx, focusedSlot.currentMatch, r.index);
         });
-        listEl.appendChild(btn);
+        container.appendChild(chip);
       });
     }
   } catch (err) {
     console.error('Error probing fastest:', err);
   } finally {
-    probeBtn.disabled = false;
-    probeBtn.innerHTML = originalText;
+    btn.disabled = false;
+    btn.innerHTML = originalHtml;
+  }
+}
+
+function updateHeaderTitle() {
+  const titleEl = document.getElementById('activeHeaderTitle');
+  const focusedSlot = slots[focusedSlotIdx];
+  if (focusedSlot && focusedSlot.currentMatch) {
+    titleEl.textContent = focusedSlot.currentMatch.title || focusedSlot.currentMatch.name;
+  } else {
+    titleEl.textContent = 'MiTV Live Broadcast';
   }
 }
 
@@ -478,7 +516,7 @@ async function fetchSchedule() {
     const data = await res.json();
     if (data.ok) {
       allMatches = data.matches || [];
-      document.getElementById('matchesCountBadge').textContent = allMatches.length;
+      document.getElementById('matchesCount').textContent = allMatches.length;
       if (currentTab === 'matches') {
         renderFilterChips();
         renderSidebarList();
@@ -495,7 +533,7 @@ async function fetchChannels() {
     const data = await res.json();
     if (data.ok) {
       allChannels = data.channels || [];
-      document.getElementById('channelsCountBadge').textContent = allChannels.length;
+      document.getElementById('channelsCount').textContent = allChannels.length;
       if (currentTab === 'channels') {
         renderFilterChips();
         renderSidebarList();
@@ -507,29 +545,29 @@ async function fetchChannels() {
 }
 
 function renderFilterChips() {
-  const container = document.getElementById('filterScroll');
+  const container = document.getElementById('filterChipsScroll');
   container.innerHTML = '';
 
   let categories = ['all'];
   if (currentTab === 'matches') {
     const tourneys = new Set(allMatches.map(m => m.tournament).filter(Boolean));
-    categories = ['all', ...Array.from(tourneys).slice(0, 12)];
+    categories = ['all', ...Array.from(tourneys).slice(0, 14)];
   } else {
     const cats = new Set(allChannels.map(c => c.category).filter(Boolean));
     categories = ['all', ...Array.from(cats)];
   }
 
   categories.forEach(cat => {
-    const btn = document.createElement('button');
-    btn.className = `filter-chip ${currentFilter === cat ? 'active' : ''}`;
-    btn.textContent = cat === 'all' ? 'Todos' : cat;
-    btn.addEventListener('click', () => {
+    const chip = document.createElement('button');
+    chip.className = `filter-chip ${currentFilter === cat ? 'active' : ''}`;
+    chip.textContent = cat === 'all' ? 'Todos' : cat;
+    chip.addEventListener('click', () => {
       currentFilter = cat;
       document.querySelectorAll('.filter-chip').forEach(c => c.classList.remove('active'));
-      btn.classList.add('active');
+      chip.classList.add('active');
       renderSidebarList();
     });
-    container.appendChild(btn);
+    container.appendChild(chip);
   });
 }
 
@@ -540,19 +578,19 @@ function renderSidebarList() {
   const items = currentTab === 'matches' ? allMatches : allChannels;
   const filtered = items.filter(item => {
     const name = (item.title || item.name || '').toLowerCase();
-    const tournament = (item.tournament || item.category || '').toLowerCase();
-    const query = searchQuery.toLowerCase();
+    const tourney = (item.tournament || item.category || '').toLowerCase();
+    const q = searchQuery.toLowerCase();
 
-    const matchesSearch = !query || name.includes(query) || tournament.includes(query);
-    const matchesFilter = currentFilter === 'all' || 
+    const matchesQ = !q || name.includes(q) || tourney.includes(q);
+    const matchesFilter = currentFilter === 'all' ||
       (currentTab === 'matches' && item.tournament === currentFilter) ||
       (currentTab === 'channels' && item.category === currentFilter);
 
-    return matchesSearch && matchesFilter;
+    return matchesQ && matchesFilter;
   });
 
   if (filtered.length === 0) {
-    container.innerHTML = `<div class="list-placeholder">No se encontraron eventos disponibles</div>`;
+    container.innerHTML = `<div class="list-loading">No se encontraron eventos</div>`;
     return;
   }
 
@@ -560,63 +598,54 @@ function renderSidebarList() {
     const card = document.createElement('div');
     card.className = 'event-card';
 
-    // Check if playing in any slot
-    const isPlayingInActive = slots[activeAudioSlotIndex]?.currentMatch?.id === item.id;
-    if (isPlayingInActive) {
-      card.classList.add('active-in-slot');
-    }
+    const isPlaying = slots[focusedSlotIdx]?.currentMatch?.id === item.id;
+    if (isPlaying) card.classList.add('active-in-slot');
 
     if (currentTab === 'matches') {
       const isLive = (item.time || '').toUpperCase().includes('VIVO');
       card.innerHTML = `
-        <div class="time-pill ${isLive ? 'is-live' : ''}">
-          ${isLive ? '<span class="live-dot"></span>' : ''}${item.time || 'VIVO'}
+        <div class="time-tag ${isLive ? 'is-live' : ''}">
+          ${isLive ? '<span class="red-dot"></span>' : ''}${item.time || 'VIVO'}
         </div>
-        <div class="event-details">
-          <div class="event-tournament">${item.tournament || 'Fútbol'}</div>
-          <div class="event-title" title="${item.fullTitle || item.title}">${item.title}</div>
+        <div class="event-info">
+          <div class="event-league">${item.tournament || 'Fútbol'}</div>
+          <div class="event-name" title="${item.fullTitle || item.title}">${item.title}</div>
         </div>
-        <div class="event-actions">
-          <button class="add-slot-btn" title="Cargar en otra pantalla del Multi-Stream">+</button>
-        </div>
+        <button class="add-multistream-btn" title="Cargar en otra pantalla del Multi-Stream">+</button>
       `;
     } else {
       card.innerHTML = `
-        <div class="time-pill is-live">24/7</div>
-        <div class="event-details">
-          <div class="event-tournament">${item.category || 'Deportes'}</div>
-          <div class="event-title" title="${item.name}">${item.name}</div>
+        <div class="time-tag is-live">24/7</div>
+        <div class="event-info">
+          <div class="event-league">${item.category || 'Deportes'}</div>
+          <div class="event-name" title="${item.name}">${item.name}</div>
         </div>
-        <div class="event-actions">
-          <button class="add-slot-btn" title="Cargar en otra pantalla del Multi-Stream">+</button>
-        </div>
+        <button class="add-multistream-btn" title="Cargar en otra pantalla del Multi-Stream">+</button>
       `;
     }
 
-    // Clicking card tunes into the active audio slot
+    // Clicking card tunes into focused slot
     card.addEventListener('click', (e) => {
-      if (e.target.classList.contains('add-slot-btn')) return;
-      loadStreamInSlot(activeAudioSlotIndex, item, 0);
+      if (e.target.classList.contains('add-multistream-btn')) return;
+      loadStreamInSlot(focusedSlotIdx, item, 0);
     });
 
-    // Clicking '+' finds next empty or next available slot
-    const addBtn = card.querySelector('.add-slot-btn');
+    // Clicking '+' sends to next available slot
+    const addBtn = card.querySelector('.add-multistream-btn');
     addBtn.addEventListener('click', (e) => {
       e.stopPropagation();
-      let targetSlot = slots.findIndex(s => !s.currentMatch);
-      if (targetSlot === -1) {
-        // All filled, cycle next
-        targetSlot = (activeAudioSlotIndex + 1) % SLOTS_COUNT;
+      let target = slots.findIndex(s => !s.currentMatch);
+      if (target === -1) {
+        target = (focusedSlotIdx + 1) % SLOTS_COUNT;
       }
 
-      // If layout is 1 and user adds stream, automatically promote to layout 2 or 4
       if (currentLayout === '1') {
         setLayout('2');
-      } else if (currentLayout === '2' && targetSlot >= 2) {
+      } else if (currentLayout === '2' && target >= 2) {
         setLayout('4');
       }
 
-      loadStreamInSlot(targetSlot, item, 0);
+      loadStreamInSlot(target, item, 0);
     });
 
     container.appendChild(card);
@@ -624,37 +653,59 @@ function renderSidebarList() {
 }
 
 function highlightActiveMatchInSidebar() {
-  const activeSlot = slots[activeAudioSlotIndex];
-  const activeId = activeSlot?.currentMatch?.id;
-
+  const activeId = slots[focusedSlotIdx]?.currentMatch?.id;
   document.querySelectorAll('.event-card').forEach(card => {
     card.classList.remove('active-in-slot');
   });
-
-  if (!activeId) return;
-  renderSidebarList();
+  if (activeId) {
+    renderSidebarList();
+  }
 }
 
 // --------------------------------------------------------------------------
-// UI Event Listeners & Hotkeys
+// UI Event Listeners & Shortcuts
 // --------------------------------------------------------------------------
 function setupUIEventListeners() {
-  // Grid layout buttons
-  document.querySelectorAll('.grid-btn').forEach(btn => {
+  // Layout selector buttons
+  document.querySelectorAll('#layoutSelector .seg-btn').forEach(btn => {
     btn.addEventListener('click', () => {
       setLayout(btn.getAttribute('data-layout'));
     });
   });
 
-  // Aspect fit button
+  // Aspect fit toggle
   document.getElementById('aspectFitBtn').addEventListener('click', cycleScreenFit);
 
-  // Auto fastest probe button
-  document.getElementById('probeFastestBtn').addEventListener('click', probeFastestForActiveSlot);
+  // Auto-fastest probe button
+  document.getElementById('autoFastestBtn').addEventListener('click', probeFastestForFocusedSlot);
 
-  // Tabs
-  const tabMatches = document.getElementById('tabMatchesBtn');
-  const tabChannels = document.getElementById('tabChannelsBtn');
+  // Reload current button in footer
+  document.getElementById('reloadCurrentBtn').addEventListener('click', () => {
+    const slot = slots[focusedSlotIdx];
+    if (slot && slot.currentMatch) {
+      loadStreamInSlot(focusedSlotIdx, slot.currentMatch, slot.currentOptionIdx);
+    }
+  });
+
+  // Toggle Sidebar visibility
+  const sidebar = document.getElementById('sidebar');
+  const toggleSidebarBtn = document.getElementById('toggleSidebarBtn');
+  toggleSidebarBtn.addEventListener('click', () => {
+    sidebar.classList.toggle('collapsed');
+  });
+
+  // Fullscreen button
+  document.getElementById('fullscreenBtn').addEventListener('click', () => {
+    if (!document.fullscreenElement) {
+      document.documentElement.requestFullscreen().catch(() => {});
+    } else {
+      document.exitFullscreen().catch(() => {});
+    }
+  });
+
+  // Tabs: Matches / Channels
+  const tabMatches = document.getElementById('tabMatches');
+  const tabChannels = document.getElementById('tabChannels');
 
   tabMatches.addEventListener('click', () => {
     currentTab = 'matches';
@@ -676,41 +727,32 @@ function setupUIEventListeners() {
 
   // Search input
   const searchInput = document.getElementById('searchInput');
-  const clearSearch = document.getElementById('clearSearch');
+  const searchClear = document.getElementById('searchClear');
 
   searchInput.addEventListener('input', (e) => {
     searchQuery = e.target.value.trim();
-    clearSearch.style.display = searchQuery ? 'block' : 'none';
+    searchClear.style.display = searchQuery ? 'block' : 'none';
     renderSidebarList();
   });
 
-  clearSearch.addEventListener('click', () => {
+  searchClear.addEventListener('click', () => {
     searchInput.value = '';
     searchQuery = '';
-    clearSearch.style.display = 'none';
+    searchClear.style.display = 'none';
     renderSidebarList();
   });
 
-  // Refresh button
-  document.getElementById('refreshBtn').addEventListener('click', async () => {
-    const btn = document.getElementById('refreshBtn');
+  // Refresh list button
+  document.getElementById('refreshListBtn').addEventListener('click', async () => {
+    const btn = document.getElementById('refreshListBtn');
     btn.style.transform = 'rotate(180deg)';
     await fetch('/api/refresh');
     await Promise.all([fetchSchedule(), fetchChannels()]);
     setTimeout(() => { btn.style.transform = ''; }, 300);
   });
 
-  // Fullscreen button
-  document.getElementById('fullscreenBtn').addEventListener('click', () => {
-    if (!document.fullscreenElement) {
-      document.documentElement.requestFullscreen().catch(() => {});
-    } else {
-      document.exitFullscreen().catch(() => {});
-    }
-  });
-
-  // Mobile modal
-  const mobileBtn = document.getElementById('mobileHandoffBtn');
+  // Mobile LAN Modal
+  const mobileBtn = document.getElementById('mobileBtn');
   const phoneModal = document.getElementById('phoneModal');
   const closePhoneModalBtn = document.getElementById('closePhoneModalBtn');
   const copyLanUrlBtn = document.getElementById('copyLanUrlBtn');
@@ -737,26 +779,25 @@ function setupUIEventListeners() {
 
 function setupKeyboardShortcuts() {
   window.addEventListener('keydown', (e) => {
-    // Avoid triggering while typing in search box
     if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
 
-    // Keys 1, 2, 3, 4 switch audio focus immediately
+    // Keys 1, 2, 3, 4 switch audio focus and purple outline
     if (['1', '2', '3', '4'].includes(e.key)) {
       const idx = parseInt(e.key, 10) - 1;
-      setActiveAudioSlot(idx);
+      setFocusedSlot(idx);
     }
 
-    // Spacebar toggles Play/Pause on active slot
+    // Spacebar toggles Play/Pause on focused slot
     if (e.code === 'Space') {
       e.preventDefault();
-      const video = slots[activeAudioSlotIndex]?.videoEl;
-      if (video) {
-        if (video.paused) video.play().catch(() => {});
-        else video.pause();
+      const slot = slots[focusedSlotIdx];
+      if (slot && slot.videoEl) {
+        if (slot.videoEl.paused) slot.videoEl.play().catch(() => {});
+        else slot.videoEl.pause();
       }
     }
 
-    // Key 'f' toggles fullscreen
+    // Key 'f' toggles Fullscreen
     if (e.key === 'f' || e.key === 'F') {
       if (!document.fullscreenElement) {
         document.documentElement.requestFullscreen().catch(() => {});
@@ -776,11 +817,10 @@ async function fetchNetworkInfo() {
     const data = await res.json();
     if (data.ok) {
       lanNetworkInfo = data;
-      const lanUrl = data.localUrl;
-      document.getElementById('lanUrlInput').value = lanUrl;
+      document.getElementById('lanUrlInput').value = data.localUrl;
       const qrContainer = document.getElementById('qrContainer');
-      const encoded = encodeURIComponent(lanUrl);
-      qrContainer.innerHTML = `<img src="https://api.qrserver.com/v1/create-qr-code/?size=160x160&data=${encoded}&bgcolor=14171f&color=f1f5f9&margin=2" alt="QR Mobile" width="160" height="160" style="border-radius:4px; display:block;"/>`;
+      const encoded = encodeURIComponent(data.localUrl);
+      qrContainer.innerHTML = `<img src="https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${encoded}&bgcolor=111115&color=f4f4f6&margin=2" alt="QR Mobile" width="150" height="150" style="border-radius:4px; display:block;"/>`;
     }
   } catch (err) {
     console.error('Error fetching network info:', err);

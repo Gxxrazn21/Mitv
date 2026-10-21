@@ -27,7 +27,7 @@ const CACHE_TTL = 3 * 60 * 1000; // 3 minutes
 const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
 
 // --------------------------------------------------------------------------
-// 1. Anti-SSRF and Safe URL Validation
+// 1. URL Normalization & Anti-SSRF Validation
 // --------------------------------------------------------------------------
 function isPrivateIp(ip) {
   if (net.isIPv4(ip)) {
@@ -85,7 +85,37 @@ function isSafeExternalUrl(rawUrl) {
   return { safe: true, url: parsed.href };
 }
 
-async function safeFetch(url, options = {}, timeoutMs = 10000) {
+// Universal URL normalizer
+function normalizeSourceUrl(rawUrl, base = 'https://pirlotv.la/') {
+  if (!rawUrl || typeof rawUrl !== 'string') return null;
+  let trimmed = rawUrl.trim();
+  if (!trimmed || trimmed === 'about:blank') return null;
+
+  // Handle protocol-relative URL
+  if (trimmed.startsWith('//')) {
+    trimmed = 'https:' + trimmed;
+  }
+
+  // Handle Base64 parameter ?r=
+  const b64Match = trimmed.match(/[?&]r=([a-zA-Z0-9+/=]+)/);
+  if (b64Match) {
+    try {
+      const decodedParam = decodeURIComponent(b64Match[1]);
+      const targetFromB64 = Buffer.from(decodedParam, 'base64').toString('utf8');
+      if (targetFromB64 && targetFromB64.startsWith('http')) {
+        return targetFromB64;
+      }
+    } catch (e) {}
+  }
+
+  try {
+    return new URL(trimmed, base).href;
+  } catch (e) {
+    return null;
+  }
+}
+
+async function safeFetch(url, options = {}, timeoutMs = 9000) {
   const controller = new AbortController();
   const id = setTimeout(() => controller.abort(), timeoutMs);
   try {
@@ -104,7 +134,7 @@ async function safeFetch(url, options = {}, timeoutMs = 10000) {
 }
 
 // --------------------------------------------------------------------------
-// 2. Scraper & Parser
+// 2. Scraper & Parser (UTF-8 Clean)
 // --------------------------------------------------------------------------
 function parseMatches(html) {
   const matches = [];
@@ -138,15 +168,19 @@ function parseMatches(html) {
       const optRegex = /<a href=["']([^"']+)["']>([^<]+)<\/a>/gi;
       let optMatch;
       while ((optMatch = optRegex.exec(optionsHtml)) !== null) {
-        const url = optMatch[1].trim();
+        const rawUrl = optMatch[1].trim();
         const rawName = optMatch[2].trim();
 
-        if (IGNORED_PATHS.some(ign => url.toLowerCase().includes(ign) || rawName.toLowerCase().includes('dmca') || rawName.toLowerCase().includes('aviso'))) {
+        if (IGNORED_PATHS.some(ign => rawUrl.toLowerCase().includes(ign) || rawName.toLowerCase().includes('dmca') || rawName.toLowerCase().includes('aviso'))) {
           continue;
         }
 
+        const normalizedUrl = normalizeSourceUrl(rawUrl, 'https://pirlotv.la/');
+        if (!normalizedUrl) continue;
+
         options.push({
-          url,
+          url: normalizedUrl,
+          rawUrl,
           name: rawName,
           isHD: rawName.toUpperCase().includes('(HD)') || rawName.toUpperCase().includes('HD')
         });
@@ -186,10 +220,14 @@ function parseChannels(html) {
       const optRegex = /<a href=["']([^"']+)["']>([^<]+)<\/a>/gi;
       let optMatch;
       while ((optMatch = optRegex.exec(optionsHtml)) !== null) {
-        const url = optMatch[1].trim();
+        const rawUrl = optMatch[1].trim();
         const name = optMatch[2].trim();
+        const normalizedUrl = normalizeSourceUrl(rawUrl, 'https://pirlotv.la/');
+        if (!normalizedUrl) continue;
+
         options.push({
-          url,
+          url: normalizedUrl,
+          rawUrl,
           name,
           isHD: name.toUpperCase().includes('(HD)') || name.toUpperCase().includes('HD')
         });
@@ -313,128 +351,127 @@ function unpackDeanEdwards(packed) {
   return p.replace(/\b\w+\b/g, (token) => dict[token] !== undefined ? dict[token] : token);
 }
 
-// Deep text analyzer for HLS (.m3u8) and DASH (.mpd) with ClearKey DRM
-function extractStreamsFromText(text, referer) {
-  if (!text || typeof text !== 'string') return null;
+// Extract .m3u8 stream URLs from HTML text & scripts
+function extractStreamsFromHtml(html) {
+  if (!html || typeof html !== 'string') return [];
+  const foundUrls = new Set();
 
   // 1. Check window._econfig
-  const econfigMatch = text.match(/window\._econfig\s*=\s*['"]([^'"]+)['"]/);
+  const econfigMatch = html.match(/window\._econfig\s*=\s*['"]([^'"]+)['"]/);
   if (econfigMatch) {
     const dec = decodeEConfig(econfigMatch[1]);
     if (dec) {
-      const urls = [];
-      if (dec.stream_url) urls.push(dec.stream_url);
-      if (dec.stream_url_nop2p && !urls.includes(dec.stream_url_nop2p)) urls.push(dec.stream_url_nop2p);
-      if (urls.length > 0) {
-        return { mode: 'hls', streamUrls: urls, referer };
-      }
+      if (dec.stream_url && dec.stream_url.includes('.m3u8')) foundUrls.add(dec.stream_url);
+      if (dec.stream_url_nop2p && dec.stream_url_nop2p.includes('.m3u8')) foundUrls.add(dec.stream_url_nop2p);
     }
   }
 
-  // 2. Check JSON streamUrls array (e.g. xstream.st / capo pro)
-  const m3u8Arr = text.match(/const\s+streamUrls\s*=\s*(\[[^\]]+\])/i) || text.match(/streamUrls\s*=\s*(\[[^\]]+\])/i);
-  if (m3u8Arr) {
+  // 2. Arrays: streamUrls, urls, sources
+  const arrRegex = /(?:streamUrls|urls|sources)\s*=\s*(\[[^\]]+\])/gi;
+  let arrMatch;
+  while ((arrMatch = arrRegex.exec(html)) !== null) {
     try {
-      const urls = JSON.parse(m3u8Arr[1].replace(/\\u0026/g, '&'));
-      if (Array.isArray(urls) && urls.length > 0) {
-        return { mode: 'hls', streamUrls: urls, referer };
+      const parsed = JSON.parse(arrMatch[1].replace(/\\u0026/g, '&'));
+      if (Array.isArray(parsed)) {
+        parsed.forEach(u => {
+          if (typeof u === 'string' && u.includes('.m3u8')) foundUrls.add(u);
+        });
       }
     } catch (e) {}
   }
 
-  // 3. Check for DASH (.mpd) with DRM ClearKey
-  const clearKeysMatch = text.match(/clearKeys?\s*:\s*\{([^}]+)\}/i) || text.match(/drm:\s*\{[\s\S]*?clearKeys:\s*\{([^}]+)\}/i);
-  const mpdMatch = text.match(/(?:file|source|src|url)\s*[:=]\s*["']((?:https?:)?\/\/[^"']+\.mpd[^"']*)["']/i) || text.match(/["']((?:https?:)?\/\/[^"'\s<>\\]+\.mpd(?:\?[^"'\s<>\\]*)?)["']/i);
-  if (mpdMatch) {
-    let clearKeys = null;
-    if (clearKeysMatch) {
-      const pairRegex = /["']?([0-9a-fA-F]{32})["']?\s*:\s*["']([0-9a-fA-F]{32})["']/g;
-      let pm;
-      clearKeys = {};
-      while ((pm = pairRegex.exec(clearKeysMatch[1])) !== null) {
-        clearKeys[pm[1].toLowerCase()] = pm[2].toLowerCase();
+  // 3. Variables: playbackURL, source, file, hlsUrl, streamUrl, src
+  const varRegex = /(?:playbackURL|source|file|hlsUrl|streamUrl|src)\s*[:=]\s*["'](https?:\/\/[^"']+\.m3u8[^"']*)["']/gi;
+  let varMatch;
+  while ((varMatch = varRegex.exec(html)) !== null) {
+    foundUrls.add(varMatch[1].replace(/\\\//g, '/'));
+  }
+
+  // 4. Server-side atob calls & Base64 strings
+  const atobRegex = /atob\s*\(\s*["']([A-Za-z0-9+/=]{20,})["']\s*\)/g;
+  let atobMatch;
+  while ((atobMatch = atobRegex.exec(html)) !== null) {
+    try {
+      const dec = Buffer.from(atobMatch[1], 'base64').toString('utf8');
+      if (dec.startsWith('http') && dec.includes('.m3u8')) {
+        foundUrls.add(dec);
       }
-    }
-    let mpdUrl = mpdMatch[1] || mpdMatch[0];
-    if (mpdUrl.startsWith('//')) mpdUrl = 'https:' + mpdUrl;
-    return {
-      mode: 'dash',
-      streamUrls: [mpdUrl],
-      clearKeys,
-      referer
-    };
+    } catch (e) {}
   }
 
-  // 4. Variables directas: playbackURL, source, file, src, hls, stream, url
-  const varMatch = text.match(/(?:playbackURL|source|file|src|hls|stream|url)\s*[:=]\s*["'](https?:\/\/[^"']+\.(?:m3u8|mpd)[^"']*)["']/i);
-  if (varMatch) {
-    const rawUrl = varMatch[1].replace(/\\\//g, '/');
-    const isDash = rawUrl.includes('.mpd');
-    return {
-      mode: isDash ? 'dash' : 'hls',
-      streamUrls: [rawUrl],
-      clearKeys: null,
-      referer
-    };
-  }
-
-  // 5. Packed eval scripts: eval(function(p,a,c,k,e,d)...)
-  const packedMatch = text.match(/eval\s*\(\s*function\s*\(\s*p\s*,\s*a\s*,\s*c\s*,\s*k\s*,\s*e\s*,\s*d[\s\S]*?\)\s*\)/);
+  // 5. Packed scripts
+  const packedMatch = html.match(/eval\s*\(\s*function\s*\(\s*p\s*,\s*a\s*,\s*c\s*,\s*k\s*,\s*e\s*,\s*d[\s\S]*?\)\s*\)/);
   if (packedMatch) {
     const unpacked = unpackDeanEdwards(packedMatch[0]);
     if (unpacked) {
-      const res = extractStreamsFromText(unpacked, referer);
-      if (res) return res;
+      const sub = extractStreamsFromHtml(unpacked);
+      sub.forEach(u => foundUrls.add(u));
     }
   }
 
-  // 6. Base64 encoded strings inside atob(...) or long b64 tokens
-  const b64Regex = /(?:atob\s*\(\s*['"]([A-Za-z0-9+/=]{20,})['"]\s*\)|['"]([A-Za-z0-9+/=]{36,})['"])/g;
-  let bMatch;
-  while ((bMatch = b64Regex.exec(text)) !== null) {
-    try {
-      const token = bMatch[1] || bMatch[2];
-      const dec = Buffer.from(token, 'base64').toString('utf8');
-      if (dec.includes('.m3u8') || dec.includes('.mpd')) {
-        const sub = extractStreamsFromText(dec, referer);
-        if (sub) return sub;
-      }
-    } catch (e) {}
+  // 6. Raw .m3u8 URL in quotes
+  const rawRegex = /["'](https?:\/\/[^"'\s<>\\]+\.m3u8(?:\?[^"'\s<>\\]*)?)["']/gi;
+  let rawMatch;
+  while ((rawMatch = rawRegex.exec(html)) !== null) {
+    foundUrls.add(rawMatch[1]);
   }
 
-  // 7. Raw m3u8 or mpd URL in text/scripts
-  const rawM3u8 = text.match(/https?:\/\/[^"'\s<>\\]+\.m3u8(?:\?[^"'\s<>\\]*)?/i);
-  if (rawM3u8) {
-    return { mode: 'hls', streamUrls: [rawM3u8[0]], referer };
-  }
-
-  const rawMpd = text.match(/https?:\/\/[^"'\s<>\\]+\.mpd(?:\?[^"'\s<>\\]*)?/i);
-  if (rawMpd) {
-    return { mode: 'dash', streamUrls: [rawMpd[0]], clearKeys: null, referer };
-  }
-
-  return null;
+  return Array.from(foundUrls);
 }
 
-// Multi-hop recursive stream resolver (NEVER returns external web pages or falls back to embed)
+// Intelligent Iframe Selector
+function pickBestIframe(html, currentUrl) {
+  if (!html) return null;
+  // 1. Remove HTML comments first
+  const cleanHtml = html.replace(/<!--[\s\S]*?-->/g, '');
+  const matches = [...cleanHtml.matchAll(/<iframe[^>]+src=["']([^"']+)["']/gi)].map(m => m[1]);
+
+  const valid = matches.filter(src => {
+    const lower = src.toLowerCase();
+    return (
+      !lower.includes('chat') &&
+      !lower.includes('ads') &&
+      !lower.includes('doubleclick') &&
+      !lower.includes('facebook') &&
+      !lower.includes('twitter') &&
+      !lower.includes('histats') &&
+      !lower.includes('whos.amung') &&
+      !lower.includes('about:blank') &&
+      !lower.includes('google')
+    );
+  });
+
+  if (valid.length === 0) return null;
+
+  // Prioritize iframes containing player/stream keywords or ?r=
+  const priority = valid.find(src => {
+    const l = src.toLowerCase();
+    return l.includes('?r=') || l.includes('cdplay') || l.includes('xstream') || l.includes('streamtp') || l.includes('embed') || l.includes('player');
+  }) || valid[0];
+
+  return normalizeSourceUrl(priority, currentUrl);
+}
+
+// Multi-hop recursive stream resolver
 async function resolveStream(startUrl) {
-  let currentUrl = startUrl.startsWith('/') ? 'https://pirlotv.la' + startUrl : startUrl;
+  let currentUrl = normalizeSourceUrl(startUrl, 'https://pirlotv.la/');
+  if (!currentUrl) {
+    return { ok: false, error: 'URL no válida' };
+  }
+
   let referer = 'https://pirlotv.la/';
+  let lastNonPirloEmbed = null;
 
   for (let hop = 0; hop < 6; hop++) {
-    // Decode ?r= base64 redirection parameter if present
-    const b64 = currentUrl.match(/[?&]r=([a-zA-Z0-9+/=]+)/);
-    if (b64) {
-      try {
-        currentUrl = Buffer.from(b64[1], 'base64').toString('utf8');
-      } catch (e) {}
-    }
-    if (currentUrl.startsWith('//')) currentUrl = 'https:' + currentUrl;
-
     const safety = isSafeExternalUrl(currentUrl);
     if (!safety.safe) {
       console.warn(`[Resolver Hop ${hop}] Blocked by SSRF:`, safety.reason);
       break;
+    }
+
+    // Keep track of the last player embed that is NOT pirlotv.la
+    if (!currentUrl.includes('pirlotv.la')) {
+      lastNonPirloEmbed = currentUrl;
     }
 
     try {
@@ -448,68 +485,43 @@ async function resolveStream(startUrl) {
       if (!res.ok) break;
       const html = await res.text();
 
-      // Check for stream manifests in the current HTML/scripts
-      const found = extractStreamsFromText(html, currentUrl);
-      if (found) {
+      // Check for direct .m3u8 stream manifests
+      const streams = extractStreamsFromHtml(html);
+      if (streams.length > 0) {
         return {
           ok: true,
-          hop,
+          mode: 'hls',
+          streamUrls: streams,
           targetUrl: currentUrl,
-          ...found
+          referer: currentUrl,
+          hop
         };
       }
 
-      // If no stream in current layer, scan for legitimate video iframes
-      // First strip comments to avoid fake/dead iframes
-      const cleanHtml = html.replace(/<!--[\s\S]*?-->/g, '');
-      const iframeMatches = [...cleanHtml.matchAll(/<iframe[^>]+src=["']([^"']+)["']/gi)].map(m => m[1]);
-
-      // Filter out tracking, ads, social and blank iframes
-      const validIframes = iframeMatches.filter(src => {
-        const lower = src.toLowerCase();
-        return (
-          !lower.includes('chat') &&
-          !lower.includes('ads') &&
-          !lower.includes('doubleclick') &&
-          !lower.includes('facebook') &&
-          !lower.includes('twitter') &&
-          !lower.includes('about:blank') &&
-          !lower.includes('whos.amung') &&
-          !lower.includes('histats') &&
-          !lower.includes('google')
-        );
-      });
-
-      if (validIframes.length === 0) break;
-
-      // Select the most promising video player iframe
-      const chosenIframe = validIframes.find(src =>
-        src.includes('cdplay') ||
-        src.includes('xstream') ||
-        src.includes('gate') ||
-        src.includes('embed') ||
-        src.includes('player') ||
-        src.includes('stream') ||
-        src.includes('.php')
-      ) || validIframes[0];
+      // Check for intelligent iframe
+      const nextIframe = pickBestIframe(html, currentUrl);
+      if (!nextIframe) break;
 
       referer = currentUrl;
-      let nextUrl = chosenIframe.trim();
-      if (nextUrl.startsWith('//')) {
-        nextUrl = 'https:' + nextUrl;
-      } else if (nextUrl.startsWith('/')) {
-        nextUrl = new URL(nextUrl, currentUrl).href;
-      } else if (!nextUrl.startsWith('http')) {
-        nextUrl = new URL(nextUrl, currentUrl).href;
-      }
-      currentUrl = nextUrl;
+      currentUrl = nextIframe;
     } catch (e) {
       console.warn(`[Resolver Hop ${hop} Error]:`, e.message);
       break;
     }
   }
 
-  // Pure stream extraction: if no stream was extracted, report cleanly without falling back to embedding web pages
+  // If no direct .m3u8 was found, but we reached a real non-pirlotv player (Shaka / Clappr / DRM embed)
+  if (lastNonPirloEmbed && !lastNonPirloEmbed.includes('pirlotv.la')) {
+    return {
+      ok: true,
+      mode: 'embed',
+      embedUrl: `/player/clean-embed?url=${encodeURIComponent(lastNonPirloEmbed)}&referer=${encodeURIComponent(referer)}`,
+      rawEmbedUrl: lastNonPirloEmbed,
+      streamUrls: [],
+      referer
+    };
+  }
+
   return {
     ok: false,
     error: 'No se pudo extraer el flujo de video directo para esta opción'
@@ -562,15 +574,18 @@ app.get('/api/resolve', async (req, res) => {
     return res.status(400).json({ ok: false, error: 'Parámetro url es obligatorio' });
   }
 
-  if (url.startsWith('http://') || url.startsWith('https://')) {
-    const safety = isSafeExternalUrl(url);
-    if (!safety.safe) {
-      return res.status(403).json({ ok: false, error: safety.reason });
-    }
+  const normalized = normalizeSourceUrl(url, 'https://pirlotv.la/');
+  if (!normalized) {
+    return res.status(400).json({ ok: false, error: 'Formato de URL inválido' });
+  }
+
+  const safety = isSafeExternalUrl(normalized);
+  if (!safety.safe) {
+    return res.status(403).json({ ok: false, error: safety.reason });
   }
 
   try {
-    const result = await resolveStream(url);
+    const result = await resolveStream(normalized);
     res.json(result);
   } catch (err) {
     res.status(500).json({ ok: false, error: err.message });
@@ -578,7 +593,7 @@ app.get('/api/resolve', async (req, res) => {
 });
 
 // --------------------------------------------------------------------------
-// 5. Verification & Speed Benchmark Endpoint (/api/probe-fastest)
+// 5. Parallel Speed & Latency Benchmark (/api/probe-fastest)
 // --------------------------------------------------------------------------
 app.post('/api/probe-fastest', async (req, res) => {
   const options = req.body && Array.isArray(req.body.options) ? req.body.options : [];
@@ -586,74 +601,106 @@ app.post('/api/probe-fastest', async (req, res) => {
     return res.status(400).json({ ok: false, error: 'Lista de opciones vacía' });
   }
 
-  // Probe all options in parallel
   const probePromises = options.map(async (opt, index) => {
     try {
       const resolved = await resolveStream(opt.url);
-      if (!resolved || !resolved.ok || !resolved.streamUrls || resolved.streamUrls.length === 0) {
+      if (!resolved || !resolved.ok) {
         return {
           ...opt,
           index,
           available: false,
           latencyMs: 9999,
           mode: 'unavailable',
-          error: resolved?.error || 'Sin flujo extraído'
+          error: resolved?.error || 'Sin señal'
         };
       }
 
-      const testTarget = resolved.streamUrls[0];
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 3500);
-      const probeStart = performance.now();
+      if (resolved.mode === 'hls' && resolved.streamUrls && resolved.streamUrls.length > 0) {
+        const testTarget = resolved.streamUrls[0];
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 3500);
+        const probeStart = performance.now();
 
-      try {
-        const testRes = await fetch(testTarget, {
-          method: 'GET',
-          headers: {
-            'User-Agent': USER_AGENT,
-            'Referer': resolved.referer || 'https://xstream.st/',
-            'Origin': new URL(resolved.referer || 'https://xstream.st/').origin
-          },
-          signal: controller.signal
-        });
-        clearTimeout(timeoutId);
+        try {
+          const testRes = await fetch(testTarget, {
+            method: 'GET',
+            headers: {
+              'User-Agent': USER_AGENT,
+              'Referer': resolved.referer || 'https://xstream.st/',
+              'Origin': new URL(resolved.referer || 'https://xstream.st/').origin
+            },
+            signal: controller.signal
+          });
+          clearTimeout(timeoutId);
 
-        // Cancel streaming body immediately to prevent bandwidth waste
-        if (testRes.body && testRes.body.cancel) {
-          testRes.body.cancel().catch(() => {});
+          if (testRes.body && testRes.body.cancel) {
+            testRes.body.cancel().catch(() => {});
+          }
+
+          const latencyMs = Math.round(performance.now() - probeStart);
+          const isOk = testRes.ok || testRes.status === 200 || testRes.status === 206;
+
+          return {
+            ...opt,
+            index,
+            available: isOk,
+            latencyMs: isOk ? latencyMs : 9999,
+            mode: 'hls',
+            resolvedStream: resolved
+          };
+        } catch (probeErr) {
+          clearTimeout(timeoutId);
+          return {
+            ...opt,
+            index,
+            available: false,
+            latencyMs: 9999,
+            mode: 'hls',
+            error: probeErr.message
+          };
         }
+      } else if (resolved.mode === 'embed' && resolved.rawEmbedUrl) {
+        // Probe embed player availability
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 3000);
+        const probeStart = performance.now();
+        try {
+          const testRes = await fetch(resolved.rawEmbedUrl, {
+            method: 'GET',
+            headers: {
+              'User-Agent': USER_AGENT,
+              'Referer': resolved.referer || 'https://cdplay.live/'
+            },
+            signal: controller.signal
+          });
+          clearTimeout(timeoutId);
+          if (testRes.body && testRes.body.cancel) testRes.body.cancel().catch(() => {});
+          const latencyMs = Math.round(performance.now() - probeStart);
 
-        const latencyMs = Math.round(performance.now() - probeStart);
-        const isOk = testRes.ok || testRes.status === 200 || testRes.status === 206;
-
-        return {
-          ...opt,
-          index,
-          available: isOk,
-          latencyMs: isOk ? latencyMs : 9999,
-          mode: resolved.mode,
-          resolvedStream: resolved
-        };
-      } catch (probeErr) {
-        clearTimeout(timeoutId);
-        return {
-          ...opt,
-          index,
-          available: false,
-          latencyMs: 9999,
-          mode: resolved.mode,
-          error: probeErr.message
-        };
+          return {
+            ...opt,
+            index,
+            available: testRes.ok || testRes.status === 405,
+            latencyMs: latencyMs + 80, // slight offset for player shell
+            mode: 'embed',
+            resolvedStream: resolved
+          };
+        } catch (embedErr) {
+          clearTimeout(timeoutId);
+          return {
+            ...opt,
+            index,
+            available: true,
+            latencyMs: 800,
+            mode: 'embed',
+            resolvedStream: resolved
+          };
+        }
       }
+
+      return { ...opt, index, available: false, latencyMs: 9999, mode: 'unknown' };
     } catch (err) {
-      return {
-        ...opt,
-        index,
-        available: false,
-        latencyMs: 9999,
-        mode: 'error',
-        error: err.message
-      };
+      return { ...opt, index, available: false, latencyMs: 9999, mode: 'error', error: err.message };
     }
   });
 
@@ -662,9 +709,11 @@ app.post('/api/probe-fastest', async (req, res) => {
     s.status === 'fulfilled' ? s.value : { ...options[i], index: i, available: false, latencyMs: 9999 }
   );
 
-  // Filter and sort: available streams first ordered by latencyMs ascending
+  // Sorting: Available HLS first sorted by latencyMs asc, then available embed by latencyMs asc, then unavailable
   results.sort((a, b) => {
     if (a.available !== b.available) return a.available ? -1 : 1;
+    if (a.mode === 'hls' && b.mode !== 'hls') return -1;
+    if (a.mode !== 'hls' && b.mode === 'hls') return 1;
     return a.latencyMs - b.latencyMs;
   });
 
@@ -708,7 +757,7 @@ app.get('/api/network-info', (req, res) => {
 });
 
 // --------------------------------------------------------------------------
-// 7. M3U8 Playlist Proxy
+// 7. M3U8 Playlist Proxy (Correct URL Resolution with new URL(trimmed, targetUrl))
 // --------------------------------------------------------------------------
 app.get('/api/stream/m3u8', async (req, res) => {
   const targetUrl = req.query.url;
@@ -724,10 +773,15 @@ app.get('/api/stream/m3u8', async (req, res) => {
   }
 
   try {
+    let originHeader = 'https://xstream.st';
+    try {
+      originHeader = new URL(referer).origin;
+    } catch (e) {}
+
     const response = await safeFetch(targetUrl, {
       headers: {
         'Referer': referer,
-        'Origin': new URL(referer).origin
+        'Origin': originHeader
       }
     });
 
@@ -736,8 +790,8 @@ app.get('/api/stream/m3u8', async (req, res) => {
     }
 
     const playlist = await response.text();
-    const basePath = targetUrl.substring(0, targetUrl.lastIndexOf('/') + 1);
 
+    // Rewrite playlist lines safely with new URL(line, targetUrl).href
     const lines = playlist.split('\n');
     const rewritten = lines.map(line => {
       const trimmed = line.trim();
@@ -746,17 +800,19 @@ app.get('/api/stream/m3u8', async (req, res) => {
       // Rewrite URI attributes like #EXT-X-KEY or #EXT-X-MAP
       if (trimmed.startsWith('#')) {
         return line.replace(/URI=["']([^"']+)["']/g, (m, uri) => {
-          let absUri = (uri.startsWith('http://') || uri.startsWith('https://')) ? uri : new URL(uri, basePath).href;
+          let absUri = uri;
+          try {
+            absUri = new URL(uri, targetUrl).href;
+          } catch (e) {}
           return `URI="/api/stream/ts?url=${encodeURIComponent(absUri)}&referer=${encodeURIComponent(referer)}"`;
         });
       }
 
-      let absoluteTarget;
-      if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
-        absoluteTarget = trimmed;
-      } else {
-        absoluteTarget = new URL(trimmed, basePath).href;
-      }
+      // Media chunk or sub-playlist URL
+      let absoluteTarget = trimmed;
+      try {
+        absoluteTarget = new URL(trimmed, targetUrl).href;
+      } catch (e) {}
 
       const isSubPlaylist = absoluteTarget.includes('.m3u8');
       const endpoint = isSubPlaylist ? '/api/stream/m3u8' : '/api/stream/ts';
@@ -774,7 +830,7 @@ app.get('/api/stream/m3u8', async (req, res) => {
 });
 
 // --------------------------------------------------------------------------
-// 8. Ultra-Fast Zero-RAM Streaming Proxy (.ts, .m4s, .mp4, .aac)
+// 8. Ultra-Fast Zero-RAM Segment Streaming Proxy (.ts, .m4s, .mp4, .aac)
 // --------------------------------------------------------------------------
 app.get('/api/stream/ts', async (req, res) => {
   const targetUrl = req.query.url;
@@ -795,10 +851,15 @@ app.get('/api/stream/ts', async (req, res) => {
   });
 
   try {
+    let originHeader = 'https://xstream.st';
+    try {
+      originHeader = new URL(referer).origin;
+    } catch (e) {}
+
     const upstreamHeaders = {
       'User-Agent': USER_AGENT,
       'Referer': referer,
-      'Origin': new URL(referer).origin
+      'Origin': originHeader
     };
 
     if (req.headers.range) {
@@ -811,10 +872,9 @@ app.get('/api/stream/ts', async (req, res) => {
     });
 
     if (!response.ok && response.status !== 206) {
-      return res.status(response.status).send('Fallo al obtener segmento de video');
+      return res.status(response.status).send('Fallo al obtener segmento');
     }
 
-    // Determine correct content type based on segment extension
     let contentType = 'video/mp2t';
     const lowerUrl = targetUrl.toLowerCase();
     if (lowerUrl.includes('.m4s') || lowerUrl.includes('.mp4')) {
@@ -840,7 +900,7 @@ app.get('/api/stream/ts', async (req, res) => {
     // Zero-RAM streaming via Readable.fromWeb
     if (response.body) {
       const nodeStream = Readable.fromWeb(response.body);
-      nodeStream.on('error', (err) => {
+      nodeStream.on('error', () => {
         if (!res.headersSent) res.status(502).end();
       });
       nodeStream.pipe(res);
@@ -856,11 +916,184 @@ app.get('/api/stream/ts', async (req, res) => {
   }
 });
 
+// --------------------------------------------------------------------------
+// 9. Isolated Clean-Embed Proxy for DRM / Shaka Channels
+// --------------------------------------------------------------------------
+app.get('/player/clean-embed', async (req, res) => {
+  let embedUrl = req.query.url;
+  const referer = req.query.referer || 'https://cdplay.live/';
+
+  if (!embedUrl || embedUrl === 'about:blank') {
+    return res.status(400).send('Parámetro url faltante');
+  }
+
+  embedUrl = normalizeSourceUrl(embedUrl, referer);
+  if (!embedUrl) {
+    return res.status(400).send('URL inválida');
+  }
+
+  const safety = isSafeExternalUrl(embedUrl);
+  if (!safety.safe) {
+    return res.status(403).send(`Acceso denegado: ${safety.reason}`);
+  }
+
+  let originHeader = 'https://cdplay.live';
+  try {
+    originHeader = new URL(embedUrl).origin;
+  } catch (e) {}
+
+  try {
+    const response = await safeFetch(embedUrl, {
+      headers: {
+        'Referer': referer,
+        'Origin': originHeader
+      }
+    });
+
+    if (!response.ok) {
+      return res.status(response.status).send(`
+        <!DOCTYPE html>
+        <html><head><meta charset="UTF-8"><style>body{background:#070709;color:#9ca3af;font-family:sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;}</style></head>
+        <body><p>⚠️ Señal temporalmente no disponible (${response.status})</p></body></html>
+      `);
+    }
+
+    let html = await response.text();
+
+    // 1. Remove anti-iframe and trap scripts
+    html = html.replace(/<script>if\s*\(\s*window\s*==\s*window\.top\s*\)\s*\{\s*document\.location\s*=\s*["']\/["'];?\s*\}\s*<\/script>/gi, '');
+    html = html.replace(/location\[t\[5\]\]\s*=\s*["']\/block\.html["']/gi, '/* blocked */');
+    html = html.replace(/location\.href\s*=\s*["']\/block\.html["']/gi, '/* blocked */');
+    html = html.replace(/<script[^>]*>[\s\S]*?t=\["sandbox"[\s\S]*?<\/script>/gi, '');
+    html = html.replace(/<script[^>]*>[\s\S]*?hasAttribute\("sandbox"\)[\s\S]*?<\/script>/gi, '');
+
+    // 2. Remove known ad networks & popunder scripts
+    html = html.replace(/<script\s+type=["']text\/javascript["']\s+data-cfasync=["']false["']>[\s\S]*?<\/script>/gi, '');
+    html = html.replace(/<script[^>]*src=["'][^"']*(?:tag\.min\.js|aclib|waust|intellipopup|cloudfront|pa-H_qzm|histats|llvpn|r2\.dev|dtscout|popads|adcash|exoclick|juicyads|propeller)[^"']*["'][^>]*>[\s\S]*?<\/script>/gi, '');
+    html = html.replace(/<script[^>]*id=["'](?:_wauksz|aclib)["']>[\s\S]*?<\/script>/gi, '');
+    html = html.replace(/aclib\.runPop\([\s\S]*?\);?/gi, '');
+
+    const AD_KEYWORDS = ['popunder', 'popads', 'aclib', 'histats', 'dtscout', 'clickable', 'adcash', 'exoclick', 'juicyads', 'propeller', 'bet365', '1xbet', 'onclick', 'onmousedown', 'window.open', 'devtools-detector', 'disable-devtool'];
+    html = html.replace(/<script\b[^>]*>([\s\S]*?)<\/script>/gi, (allScript, content) => {
+      const lower = content.toLowerCase();
+      if (AD_KEYWORDS.some(kw => lower.includes(kw))) {
+        return '<!-- blocked ad script -->';
+      }
+      return allScript;
+    });
+
+    // 3. Rewrite internal iframes to route through clean-embed with sandbox
+    html = html.replace(/<iframe\b([^>]*)\bsrc=["']([^"']+)["']([^>]*)>/gi, (match, prefix, srcUrl, suffix) => {
+      const resolved = normalizeSourceUrl(srcUrl, embedUrl);
+      if (!resolved) return '';
+      const proxiedSrc = `/player/clean-embed?url=${encodeURIComponent(resolved)}&referer=${encodeURIComponent(embedUrl)}`;
+      return `<iframe ${prefix} src="${proxiedSrc}" sandbox="allow-scripts allow-same-origin allow-forms allow-presentation" ${suffix}>`;
+    });
+
+    // 4. Inject base tag and strict security shield & postMessage controller
+    const baseTag = `<base href="${embedUrl}">`;
+    const cleanShieldInjection = `
+      ${baseTag}
+      <style>
+        * { box-sizing: border-box; }
+        html, body {
+          width: 100vw !important;
+          height: 100vh !important;
+          margin: 0 !important;
+          padding: 0 !important;
+          overflow: hidden !important;
+          background: #000 !important;
+        }
+        video, #player, #clappr, .player-poster, .shaka-video-container, [data-player], iframe {
+          position: fixed !important;
+          inset: 0 !important;
+          width: 100vw !important;
+          height: 100vh !important;
+          max-width: 100vw !important;
+          max-height: 100vh !important;
+          object-fit: contain !important;
+          z-index: 100 !important;
+          background: #000 !important;
+        }
+        a, .banner, #chat, .chat-box, div[style*="z-index: 2147483647"], div[style*="z-index:999999"], div[class*="banner"] {
+          display: none !important;
+          pointer-events: none !important;
+        }
+      </style>
+      <script>
+        // Neutralize popups and redirects
+        window.open = function() { return null; };
+        window.alert = function() { return false; };
+        window.confirm = function() { return false; };
+        window.prompt = function() { return null; };
+        try { Object.defineProperty(window, 'top', { get: () => window.self }); } catch(e){}
+
+        // Handle Audio Mute/Unmute & Fit messages from parent
+        window.addEventListener('message', function(event) {
+          try {
+            const data = event.data;
+            if (!data || typeof data !== 'object') return;
+
+            if (data.type === 'SET_MUTE') {
+              const shouldMute = !!data.muted;
+              document.querySelectorAll('video, audio').forEach(function(media) {
+                media.muted = shouldMute;
+                if (!shouldMute) {
+                  media.volume = 1;
+                  media.play().catch(function(){});
+                }
+              });
+
+              if (window.player) {
+                if (shouldMute && window.player.mute) window.player.mute();
+                else if (!shouldMute) {
+                  if (window.player.unmute) window.player.unmute();
+                  if (window.player.setVolume) window.player.setVolume(100);
+                }
+              }
+            }
+
+            if (data.type === 'SET_FIT') {
+              const fit = data.fit || 'contain';
+              document.querySelectorAll('video, #player, #clappr, .shaka-video-container, [data-player]').forEach(function(el) {
+                el.style.setProperty('object-fit', fit, 'important');
+              });
+            }
+          } catch(err) {}
+        });
+
+        // Notify parent on click/pointerdown to activate slot
+        function notifySlotClick() {
+          try {
+            window.parent.postMessage({ type: 'SLOT_CLICKED', slotName: window.name }, '*');
+          } catch(e) {}
+        }
+        window.addEventListener('pointerdown', notifySlotClick, true);
+        window.addEventListener('click', notifySlotClick, true);
+      </script>
+    `;
+
+    if (html.includes('<head>')) {
+      html = html.replace('<head>', '<head>' + cleanShieldInjection);
+    } else {
+      html = cleanShieldInjection + html;
+    }
+
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.setHeader('X-Frame-Options', 'ALLOWALL');
+    res.setHeader('Content-Security-Policy', "frame-ancestors 'self' *;");
+    res.send(html);
+  } catch (err) {
+    console.error('Clean embed error:', err.message);
+    res.status(502).send('Error proxying embed: ' + err.message);
+  }
+});
+
 // Start server
 app.listen(PORT, '0.0.0.0', async () => {
   console.log(`\n======================================================`);
-  console.log(`⚡ MiTV Broadcast Server activo en http://0.0.0.0:${PORT}`);
-  console.log(`📡 Extractor Nativo HLS/DASH • Cero Páginas Externas • Zero-RAM`);
+  console.log(`⚡ MiTV Studio Server activo en http://0.0.0.0:${PORT}`);
+  console.log(`📺 Diseño Apple TV / YouTube TV Dark • Zero-RAM Stream`);
   console.log(`======================================================\n`);
   await refreshCache();
 });

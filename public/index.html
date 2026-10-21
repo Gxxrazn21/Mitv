@@ -3,336 +3,301 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>MiTV | Broadcast Deportivo Multi-Stream</title>
-  <meta name="description" content="Plataforma de reproducción deportiva en vivo de alto rendimiento: multi-stream hasta 4 señales, HLS y DASH nativos, latencia mínima y foco de audio exclusivo.">
+  <title>MiTV | Studio Deportivo Multi-Stream</title>
+  <meta name="description" content="Plataforma de transmisión deportiva en vivo de alto rendimiento estilo Apple TV / YouTube TV Dark. Multi-stream de 1 a 4 pantallas con foco de audio exclusivo.">
 
-  <!-- Mobile Meta Tags -->
+  <!-- Mobile PWA Meta -->
   <link rel="manifest" href="/manifest.json">
-  <meta name="theme-color" content="#0b0c10">
+  <meta name="theme-color" content="#070709">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="MiTV">
 
-  <!-- Modern Clean Typography -->
+  <!-- Inter Font -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 
-  <!-- Video Streaming Engines: HLS.js (m3u8) & Shaka Player (DASH / mpd / ClearKey DRM) -->
+  <!-- HLS.js for direct video streaming -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/hls.js/1.5.7/hls.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/shaka-player/4.7.11/shaka-player.compiled.js"></script>
 
-  <link rel="stylesheet" href="app.css?v=4.0">
+  <link rel="stylesheet" href="app.css?v=5.0">
 </head>
 <body>
-  <!-- 48px Discrete Top Navigation Bar -->
-  <header class="app-header">
-    <div class="header-left">
-      <div class="app-brand" id="brandLogo">
-        <svg class="brand-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
-          <rect x="2" y="7" width="20" height="15" rx="2" ry="2"></rect>
-          <polyline points="17 2 12 7 7 2"></polyline>
-        </svg>
-        <span class="brand-name">Mi<span class="brand-accent">TV</span></span>
-        <span class="brand-badge">LIVE</span>
+  <!-- Top Bar: 46px Height -->
+  <header class="topbar">
+    <div class="topbar-left">
+      <div class="brand-item" id="brandLogo">
+        <span class="brand-dot"></span>
+        <span class="brand-title">MiTV</span>
       </div>
+      <span class="topbar-divider"></span>
+      <div class="active-match-title" id="activeHeaderTitle">Cargando partidos...</div>
     </div>
 
-    <div class="header-center">
-      <!-- Grid View Selector [1], [2], [4] -->
-      <div class="view-selector">
-        <button class="grid-btn active" data-layout="1" title="1 Pantalla completa">
-          <svg viewBox="0 0 16 16" fill="currentColor"><rect x="1" y="1" width="14" height="14" rx="2"/></svg>
-          <span>1</span>
-        </button>
-        <button class="grid-btn" data-layout="2" title="2 Pantallas lado a lado">
-          <svg viewBox="0 0 16 16" fill="currentColor"><rect x="1" y="1" width="6.5" height="14" rx="1.5"/><rect x="8.5" y="1" width="6.5" height="14" rx="1.5"/></svg>
-          <span>2</span>
-        </button>
-        <button class="grid-btn" data-layout="4" title="4 Pantallas simultáneas (Quad 2x2)">
-          <svg viewBox="0 0 16 16" fill="currentColor">
-            <rect x="1" y="1" width="6.5" height="6.5" rx="1.5"/>
-            <rect x="8.5" y="1" width="6.5" height="6.5" rx="1.5"/>
-            <rect x="1" y="8.5" width="6.5" height="6.5" rx="1.5"/>
-            <rect x="8.5" y="8.5" width="6.5" height="6.5" rx="1.5"/>
-          </svg>
-          <span>4</span>
-        </button>
+    <div class="topbar-center">
+      <!-- Layout Selector [1] [2] [4] -->
+      <div class="segmented-control" id="layoutSelector">
+        <button class="seg-btn active" data-layout="1" title="1 Pantalla completa">1 Pantalla</button>
+        <button class="seg-btn" data-layout="2" title="2 Pantallas lado a lado">2 Split</button>
+        <button class="seg-btn" data-layout="4" title="4 Pantallas simultáneas (Quad 2x2)">4 Quad</button>
       </div>
 
-      <!-- Video Aspect Ratio Fit Toggle -->
-      <button id="aspectFitBtn" class="header-tool-btn" title="Ajuste de relación de aspecto de video">
-        <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2">
-          <rect x="3" y="5" width="18" height="14" rx="2"></rect>
-          <polyline points="3 7 12 13 21 7"></polyline>
+      <!-- Aspect Fit Toggle -->
+      <button class="topbar-btn" id="aspectFitBtn" title="Ajuste de pantalla (16:9 / Llenar / Zoom)">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
+          <rect x="2" y="4" width="20" height="16" rx="2"></rect>
+          <path d="M7 10l5 5 5-5"></path>
         </svg>
         <span id="aspectFitLabel">16:9</span>
       </button>
 
-      <!-- Auto Best Signal / Fastest Probe -->
-      <button id="probeFastestBtn" class="header-tool-btn" title="Sondear el servidor con menor latencia para el partido activo">
-        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.2">
-          <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon>
+      <!-- Fullscreen Toggle -->
+      <button class="topbar-btn" id="fullscreenBtn" title="Pantalla completa (F)">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/>
         </svg>
-        <span>Mejor Señal</span>
+        <span>Pantalla Completa</span>
       </button>
 
-      <!-- Mobile Handoff -->
-      <button id="mobileHandoffBtn" class="header-tool-btn" title="Abrir en teléfono móvil o transmitir">
-        <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2">
+      <!-- Mobile / LAN Handoff -->
+      <button class="topbar-btn" id="mobileBtn" title="Ver en el móvil o red local">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
           <rect x="5" y="2" width="14" height="20" rx="2"></rect>
           <line x1="12" y1="18" x2="12.01" y2="18"></line>
         </svg>
-        <span>Móvil</span>
+        <span>Móvil / LAN</span>
       </button>
     </div>
 
-    <div class="header-right">
-      <!-- Search Input -->
-      <div class="search-container">
-        <svg class="search-icon" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
-          <circle cx="11" cy="11" r="8"></circle>
-          <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+    <div class="topbar-right">
+      <!-- Toggle Sidebar Visibility (Allows video to take 100% width) -->
+      <button class="toggle-sidebar-btn" id="toggleSidebarBtn" title="Ocultar / Mostrar programación lateral">
+        <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2">
+          <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+          <line x1="15" y1="3" x2="15" y2="21"></line>
         </svg>
-        <input type="text" id="searchInput" placeholder="Buscar partido o canal..." autocomplete="off">
-        <button id="clearSearch" class="clear-search-btn" style="display:none;">&times;</button>
-      </div>
-
-      <!-- Reload button -->
-      <button id="refreshBtn" class="icon-action-btn" title="Actualizar programación">
-        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
-          <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/>
-        </svg>
-      </button>
-
-      <!-- Fullscreen toggle -->
-      <button id="fullscreenBtn" class="icon-action-btn" title="Pantalla completa (F)">
-        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
-          <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/>
-        </svg>
+        <span id="toggleSidebarText">Canales y Partidos</span>
       </button>
     </div>
   </header>
 
-  <!-- Main App Shell: 100dvh - 48px (Zero vertical page scroll) -->
-  <main class="app-body">
-    <!-- Left Column: Video Area (1fr) -->
-    <section class="video-stage">
-      <!-- Multi-Stream Video Grid (1 to 4 slots) -->
-      <div id="videoGrid" class="video-grid layout-1">
+  <!-- App Shell Body (100dvh - 46px) -->
+  <main class="app-stage">
+    <!-- Left Area: Video Stage (Flex: 1) -->
+    <section class="stage" id="stage">
+      <!-- 4-Slot Multi-Stream Video Grid -->
+      <div class="video-grid layout-1" id="videoGrid">
         <!-- SLOT 0 -->
-        <div class="stream-slot active-audio-slot" id="slot-0" data-slot="0">
-          <div class="slot-badge-audio">
-            <svg viewBox="0 0 24 24" width="13" height="13" fill="currentColor">
-              <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon>
-              <path d="M15.54 8.46a5 5 0 0 1 0 7.07"></path>
-              <path d="M19.07 4.93a10 10 0 0 1 0 14.14"></path>
-            </svg>
-            <span>AUDIO [1]</span>
+        <div class="stream-slot active-audio" id="slot-0" data-slot="0">
+          <div class="slot-audio-badge">
+            <span class="audio-icon">🔊</span>
+            <span class="audio-label">AUDIO [1]</span>
           </div>
-
-          <div class="slot-top-bar">
-            <span class="slot-title">Ranura 1: Esperando selección</span>
-            <div class="slot-controls">
-              <button class="slot-btn slot-reload-btn" title="Recargar señal">🔄</button>
-              <button class="slot-btn slot-close-btn" title="Cerrar señal">✖</button>
+          <div class="slot-floating-bar">
+            <span class="slot-title">Ranura 1</span>
+            <div class="slot-actions">
+              <button class="slot-mini-btn slot-reload" title="Recargar">↻</button>
+              <button class="slot-mini-btn slot-close" title="Cerrar">✕</button>
             </div>
           </div>
-
           <div class="slot-media-box">
             <video class="slot-video" playsinline controls preload="auto"></video>
-            <div class="slot-state slot-loader" style="display:none;">
-              <div class="spinner"></div>
-              <span class="loader-msg">Extrayendo flujo de video...</span>
+            <iframe class="slot-iframe" name="slot-0" sandbox="allow-scripts allow-same-origin allow-forms allow-presentation" allow="autoplay; fullscreen; encrypted-media; picture-in-picture" allowfullscreen="true"></iframe>
+            <div class="slot-overlay slot-loader" style="display:none;">
+              <div class="loader-spinner"></div>
+              <span class="loader-text">Conectando señal...</span>
             </div>
-            <div class="slot-state slot-error" style="display:none;">
-              <span class="error-icon">⚠️</span>
-              <p class="error-msg">Flujo no disponible</p>
+            <div class="slot-overlay slot-error" style="display:none;">
+              <span class="error-emoji">⚠️</span>
+              <p class="error-text">No se pudo reproducir la señal</p>
               <button class="slot-retry-btn">Reintentar</button>
             </div>
-            <div class="slot-state slot-empty">
-              <span class="empty-num">1</span>
-              <p class="empty-text">Haz clic en un partido de la lista lateral para reproducir aquí.</p>
+            <div class="slot-overlay slot-empty">
+              <span class="empty-icon">1</span>
+              <p>Selecciona un partido del panel derecho</p>
             </div>
           </div>
         </div>
 
         <!-- SLOT 1 -->
         <div class="stream-slot" id="slot-1" data-slot="1">
-          <div class="slot-badge-audio">
-            <svg viewBox="0 0 24 24" width="13" height="13" fill="currentColor">
-              <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon>
-              <path d="M15.54 8.46a5 5 0 0 1 0 7.07"></path>
-              <path d="M19.07 4.93a10 10 0 0 1 0 14.14"></path>
-            </svg>
-            <span>AUDIO [2]</span>
+          <div class="slot-audio-badge">
+            <span class="audio-icon">🔊</span>
+            <span class="audio-label">AUDIO [2]</span>
           </div>
-
-          <div class="slot-top-bar">
-            <span class="slot-title">Ranura 2: Vacía</span>
-            <div class="slot-controls">
-              <button class="slot-btn slot-reload-btn" title="Recargar señal">🔄</button>
-              <button class="slot-btn slot-close-btn" title="Cerrar señal">✖</button>
+          <div class="slot-floating-bar">
+            <span class="slot-title">Ranura 2</span>
+            <div class="slot-actions">
+              <button class="slot-mini-btn slot-reload" title="Recargar">↻</button>
+              <button class="slot-mini-btn slot-close" title="Cerrar">✕</button>
             </div>
           </div>
-
           <div class="slot-media-box">
             <video class="slot-video" playsinline controls preload="auto"></video>
-            <div class="slot-state slot-loader" style="display:none;">
-              <div class="spinner"></div>
-              <span class="loader-msg">Extrayendo flujo de video...</span>
+            <iframe class="slot-iframe" name="slot-1" sandbox="allow-scripts allow-same-origin allow-forms allow-presentation" allow="autoplay; fullscreen; encrypted-media; picture-in-picture" allowfullscreen="true"></iframe>
+            <div class="slot-overlay slot-loader" style="display:none;">
+              <div class="loader-spinner"></div>
+              <span class="loader-text">Conectando señal...</span>
             </div>
-            <div class="slot-state slot-error" style="display:none;">
-              <span class="error-icon">⚠️</span>
-              <p class="error-msg">Flujo no disponible</p>
+            <div class="slot-overlay slot-error" style="display:none;">
+              <span class="error-emoji">⚠️</span>
+              <p class="error-text">No se pudo reproducir la señal</p>
               <button class="slot-retry-btn">Reintentar</button>
             </div>
-            <div class="slot-state slot-empty">
-              <span class="empty-num">2</span>
-              <p class="empty-text">Pulsa [+] en un partido o selecciónalo para sintonizar.</p>
+            <div class="slot-overlay slot-empty">
+              <span class="empty-icon">2</span>
+              <p>Ranura 2 disponible para Multi-Stream</p>
             </div>
           </div>
         </div>
 
         <!-- SLOT 2 -->
         <div class="stream-slot" id="slot-2" data-slot="2">
-          <div class="slot-badge-audio">
-            <svg viewBox="0 0 24 24" width="13" height="13" fill="currentColor">
-              <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon>
-              <path d="M15.54 8.46a5 5 0 0 1 0 7.07"></path>
-              <path d="M19.07 4.93a10 10 0 0 1 0 14.14"></path>
-            </svg>
-            <span>AUDIO [3]</span>
+          <div class="slot-audio-badge">
+            <span class="audio-icon">🔊</span>
+            <span class="audio-label">AUDIO [3]</span>
           </div>
-
-          <div class="slot-top-bar">
-            <span class="slot-title">Ranura 3: Vacía</span>
-            <div class="slot-controls">
-              <button class="slot-btn slot-reload-btn" title="Recargar señal">🔄</button>
-              <button class="slot-btn slot-close-btn" title="Cerrar señal">✖</button>
+          <div class="slot-floating-bar">
+            <span class="slot-title">Ranura 3</span>
+            <div class="slot-actions">
+              <button class="slot-mini-btn slot-reload" title="Recargar">↻</button>
+              <button class="slot-mini-btn slot-close" title="Cerrar">✕</button>
             </div>
           </div>
-
           <div class="slot-media-box">
             <video class="slot-video" playsinline controls preload="auto"></video>
-            <div class="slot-state slot-loader" style="display:none;">
-              <div class="spinner"></div>
-              <span class="loader-msg">Extrayendo flujo de video...</span>
+            <iframe class="slot-iframe" name="slot-2" sandbox="allow-scripts allow-same-origin allow-forms allow-presentation" allow="autoplay; fullscreen; encrypted-media; picture-in-picture" allowfullscreen="true"></iframe>
+            <div class="slot-overlay slot-loader" style="display:none;">
+              <div class="loader-spinner"></div>
+              <span class="loader-text">Conectando señal...</span>
             </div>
-            <div class="slot-state slot-error" style="display:none;">
-              <span class="error-icon">⚠️</span>
-              <p class="error-msg">Flujo no disponible</p>
+            <div class="slot-overlay slot-error" style="display:none;">
+              <span class="error-emoji">⚠️</span>
+              <p class="error-text">No se pudo reproducir la señal</p>
               <button class="slot-retry-btn">Reintentar</button>
             </div>
-            <div class="slot-state slot-empty">
-              <span class="empty-num">3</span>
-              <p class="empty-text">Ranura 3 disponible para Multi-Stream.</p>
+            <div class="slot-overlay slot-empty">
+              <span class="empty-icon">3</span>
+              <p>Ranura 3 disponible para Quad</p>
             </div>
           </div>
         </div>
 
         <!-- SLOT 3 -->
         <div class="stream-slot" id="slot-3" data-slot="3">
-          <div class="slot-badge-audio">
-            <svg viewBox="0 0 24 24" width="13" height="13" fill="currentColor">
-              <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon>
-              <path d="M15.54 8.46a5 5 0 0 1 0 7.07"></path>
-              <path d="M19.07 4.93a10 10 0 0 1 0 14.14"></path>
-            </svg>
-            <span>AUDIO [4]</span>
+          <div class="slot-audio-badge">
+            <span class="audio-icon">🔊</span>
+            <span class="audio-label">AUDIO [4]</span>
           </div>
-
-          <div class="slot-top-bar">
-            <span class="slot-title">Ranura 4: Vacía</span>
-            <div class="slot-controls">
-              <button class="slot-btn slot-reload-btn" title="Recargar señal">🔄</button>
-              <button class="slot-btn slot-close-btn" title="Cerrar señal">✖</button>
+          <div class="slot-floating-bar">
+            <span class="slot-title">Ranura 4</span>
+            <div class="slot-actions">
+              <button class="slot-mini-btn slot-reload" title="Recargar">↻</button>
+              <button class="slot-mini-btn slot-close" title="Cerrar">✕</button>
             </div>
           </div>
-
           <div class="slot-media-box">
             <video class="slot-video" playsinline controls preload="auto"></video>
-            <div class="slot-state slot-loader" style="display:none;">
-              <div class="spinner"></div>
-              <span class="loader-msg">Extrayendo flujo de video...</span>
+            <iframe class="slot-iframe" name="slot-3" sandbox="allow-scripts allow-same-origin allow-forms allow-presentation" allow="autoplay; fullscreen; encrypted-media; picture-in-picture" allowfullscreen="true"></iframe>
+            <div class="slot-overlay slot-loader" style="display:none;">
+              <div class="loader-spinner"></div>
+              <span class="loader-text">Conectando señal...</span>
             </div>
-            <div class="slot-state slot-error" style="display:none;">
-              <span class="error-icon">⚠️</span>
-              <p class="error-msg">Flujo no disponible</p>
+            <div class="slot-overlay slot-error" style="display:none;">
+              <span class="error-emoji">⚠️</span>
+              <p class="error-text">No se pudo reproducir la señal</p>
               <button class="slot-retry-btn">Reintentar</button>
             </div>
-            <div class="slot-state slot-empty">
-              <span class="empty-num">4</span>
-              <p class="empty-text">Ranura 4 disponible para pantalla Quad 2x2.</p>
+            <div class="slot-overlay slot-empty">
+              <span class="empty-icon">4</span>
+              <p>Ranura 4 disponible para Quad</p>
             </div>
           </div>
         </div>
       </div>
 
-      <!-- Discrete 40px Bottom Bar for Active Slot Server Options -->
-      <div class="active-servers-bar" id="activeServersBar">
-        <div class="servers-label-group">
-          <span class="active-match-name" id="activeMatchName">Ningún evento seleccionado</span>
+      <!-- Stage Footer: 44px Height -->
+      <footer class="stage-footer">
+        <div class="focused-pill" id="focusedSlotPill">Pantalla 1 · Audio Activo</div>
+        <div class="server-chips-wrapper" id="serverChipsList">
+          <span class="no-options-hint">Selecciona un evento para ver servidores</span>
         </div>
-        <div class="server-options-list" id="serverOptionsList">
-          <!-- Dynamically populated with fast option pills -->
+        <div class="footer-actions">
+          <button class="tool-chip auto-chip" id="autoFastestBtn" title="Probar latencias y elegir el canal más rápido">
+            <span>⚡ Auto-Rápido</span>
+          </button>
+          <button class="tool-chip" id="reloadCurrentBtn" title="Reiniciar señal actual">
+            <span>↻ Recargar</span>
+          </button>
         </div>
-      </div>
+      </footer>
     </section>
 
-    <!-- Right Column: Dense Programming Sidebar (340px) -->
-    <aside class="programming-sidebar" id="sidebar">
-      <!-- Tabs: Partidos | Canales 24/7 -->
-      <div class="sidebar-tabs">
-        <button class="tab-btn active" data-tab="matches" id="tabMatchesBtn">
-          <span>Partidos de Hoy</span>
-          <span class="badge-count" id="matchesCountBadge">0</span>
-        </button>
-        <button class="tab-btn" data-tab="channels" id="tabChannelsBtn">
-          <span>Canales 24/7</span>
-          <span class="badge-count" id="channelsCountBadge">0</span>
-        </button>
+    <!-- Right Area: Retractable Programming Sidebar (340px) -->
+    <aside class="sidebar" id="sidebar">
+      <!-- Segmented Navigation: Matches / Channels -->
+      <div class="sidebar-header">
+        <div class="segmented-control full-width" id="tabSelector">
+          <button class="seg-btn active" data-tab="matches" id="tabMatches">
+            <span>Partidos</span>
+            <span class="count-pill" id="matchesCount">0</span>
+          </button>
+          <button class="seg-btn" data-tab="channels" id="tabChannels">
+            <span>Canales 24/7</span>
+            <span class="count-pill" id="channelsCount">0</span>
+          </button>
+        </div>
       </div>
 
-      <!-- Compact Horizontal League/Category Filter Pills -->
-      <div class="filter-bar" id="filterBar">
-        <div class="filter-scroll" id="filterScroll">
+      <!-- Search & Refresh Row -->
+      <div class="search-row">
+        <div class="search-input-box">
+          <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="11" cy="11" r="8"></circle>
+            <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+          </svg>
+          <input type="text" id="searchInput" placeholder="Filtrar por equipo o torneo..." autocomplete="off">
+          <button class="search-clear" id="searchClear" style="display:none;">&times;</button>
+        </div>
+        <button class="search-reload-btn" id="refreshListBtn" title="Actualizar programación en vivo">↻</button>
+      </div>
+
+      <!-- Filter Chips Row -->
+      <div class="filter-row" id="filterRow">
+        <div class="filter-chips-scroll" id="filterChipsScroll">
           <button class="filter-chip active" data-filter="all">Todos</button>
         </div>
       </div>
 
-      <!-- Dense Scrollable Event List -->
-      <div class="sidebar-scroll" id="sidebarList">
-        <div class="list-placeholder">Cargando programación en vivo...</div>
+      <!-- Scrollable Event List -->
+      <div class="sidebar-list" id="sidebarList">
+        <div class="list-loading">Cargando eventos en vivo...</div>
       </div>
     </aside>
   </main>
 
-  <!-- Mobile Handoff Modal -->
-  <div id="phoneModal" class="modal-backdrop" style="display:none;">
-    <div class="modal-card">
-      <div class="modal-header">
-        <div class="modal-title-box">
-          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2">
-            <rect x="5" y="2" width="14" height="20" rx="2"></rect>
-            <line x1="12" y1="18" x2="12.01" y2="18"></line>
-          </svg>
-          <h3>Traspaso a Móvil & Red LAN</h3>
+  <!-- Mobile LAN Modal -->
+  <div class="modal-layer" id="phoneModal" style="display:none;">
+    <div class="modal-box">
+      <div class="modal-top">
+        <div class="modal-headline">
+          <span class="modal-purple-dot"></span>
+          <h3>Traspaso a Móvil / Red LAN</h3>
         </div>
-        <button id="closePhoneModalBtn" class="modal-close-btn">&times;</button>
+        <button class="modal-close" id="closePhoneModalBtn">&times;</button>
       </div>
-
-      <div class="modal-body">
-        <p class="modal-info">Conéctate a la <strong>misma red Wi-Fi</strong> y abre el enlace o escanea el QR en tu teléfono:</p>
-        <div class="qr-box" id="qrContainer"></div>
-        <div class="url-copy-row">
+      <div class="modal-content">
+        <p class="modal-guide">Conecta tu teléfono a la <strong>misma red Wi-Fi</strong> y abre el enlace o escanea el código:</p>
+        <div class="modal-qr-container" id="qrContainer"></div>
+        <div class="modal-copy-row">
           <input type="text" id="lanUrlInput" readonly>
-          <button id="copyLanUrlBtn" class="copy-btn">Copiar</button>
+          <button class="copy-action-btn" id="copyLanUrlBtn">Copiar</button>
         </div>
       </div>
     </div>
   </div>
 
-  <script src="app.js?v=4.0"></script>
+  <script src="app.js?v=5.0"></script>
 </body>
 </html>
