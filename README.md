@@ -1,3 +1,12 @@
+---
+title: Mitv
+emoji: 📺
+colorFrom: indigo
+colorTo: blue
+sdk: docker
+app_port: 7860
+---
+
 # 🛡️ Pirlo Shield — Capo Deportes & Deportes En Vivo (Sin Anuncios)
 
 Una aplicación web moderna, ultra-fluida y 100% segura diseñada para disfrutar transmisiones deportivas en vivo (Champions League, Premier League, LaLiga, Capo Deportes, ESPN, DSPORTS, Win Sports, etc.) **eliminando por completo la publicidad invasiva, redirecciones, popunders y falsos instaladores**.
@@ -54,7 +63,7 @@ npm start
 Entra a:
 
 ```
-http://localhost:3000
+http://localhost:7860
 ```
 
 ¡Y listo! Selecciona cualquier partido o canal y disfruta del deporte en vivo de forma instantánea y limpia.

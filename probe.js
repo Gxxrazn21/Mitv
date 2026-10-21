@@ -5,6 +5,15 @@
 
 const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
 
+// Container-safe flags for Chromium/Playwright (Hugging Face Spaces non-root execution)
+export const CONTAINER_BROWSER_ARGS = [
+  '--no-sandbox',
+  '--disable-setuid-sandbox',
+  '--disable-dev-shm-usage',
+  '--disable-gpu',
+  '--no-first-run'
+];
+
 function normalizeSourceUrl(rawUrl, base = 'https://pirlotv.la/') {
   if (!rawUrl || typeof rawUrl !== 'string') return null;
   let trimmed = rawUrl.trim();
