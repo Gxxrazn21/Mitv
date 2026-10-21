@@ -1,10 +1,10 @@
-// Pirlo Shield Service Worker for Mobile PWA
-const CACHE_NAME = 'pirlo-shield-v2';
+// MiTV Service Worker - PWA & Cache Management
+const CACHE_NAME = 'mitv-v5';
 const STATIC_ASSETS = [
   '/',
   '/index.html',
-  '/app.css?v=3.1',
-  '/app.js?v=3.1',
+  '/app.css?v=5.0',
+  '/app.js?v=5.0',
   '/manifest.json'
 ];
 
@@ -29,13 +29,16 @@ self.addEventListener('activate', (event) => {
 });
 
 self.addEventListener('fetch', (event) => {
-  // Let stream APIs, video chunks, and player embeds pass directly to network
   const url = new URL(event.request.url);
+
+  // Critical stream exclusion: NEVER cache API calls, player proxies, or media segments
   if (
     url.pathname.startsWith('/api/') ||
     url.pathname.startsWith('/player/') ||
     url.pathname.endsWith('.ts') ||
-    url.pathname.endsWith('.m3u8')
+    url.pathname.endsWith('.m3u8') ||
+    url.pathname.endsWith('.m4s') ||
+    url.pathname.endsWith('.mpd')
   ) {
     return;
   }

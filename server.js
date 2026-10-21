@@ -627,15 +627,15 @@ app.post('/api/probe-fastest', async (req, res) => {
             headers: {
               'User-Agent': USER_AGENT,
               'Referer': resolved.referer || 'https://xstream.st/',
-              'Origin': new URL(resolved.referer || 'https://xstream.st/').origin
+              'Origin': new URL(resolved.referer || 'https://xstream.st/').origin,
+              'Connection': 'keep-alive'
             },
             signal: controller.signal
           });
           clearTimeout(timeoutId);
 
-          if (testRes.body && testRes.body.cancel) {
-            testRes.body.cancel().catch(() => {});
-          }
+          // Cancel body immediately after reading headers so probe takes < 500ms
+          testRes.body?.cancel().catch(() => {});
 
           const latencyMs = Math.round(performance.now() - probeStart);
           const isOk = testRes.ok || testRes.status === 200 || testRes.status === 206;
@@ -822,6 +822,8 @@ app.get('/api/stream/m3u8', async (req, res) => {
     res.setHeader('Content-Type', 'application/vnd.apple.mpegurl; charset=utf-8');
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    res.setHeader('Connection', 'keep-alive');
+    res.setHeader('Keep-Alive', 'timeout=30, max=1000');
     res.send(rewritten);
   } catch (err) {
     console.error('M3U8 proxy error:', err.message);
@@ -859,7 +861,8 @@ app.get('/api/stream/ts', async (req, res) => {
     const upstreamHeaders = {
       'User-Agent': USER_AGENT,
       'Referer': referer,
-      'Origin': originHeader
+      'Origin': originHeader,
+      'Connection': 'keep-alive'
     };
 
     if (req.headers.range) {
@@ -888,6 +891,8 @@ app.get('/api/stream/ts', async (req, res) => {
     res.setHeader('Access-Control-Expose-Headers', 'Content-Range, Content-Length, Accept-Ranges');
     res.setHeader('Accept-Ranges', 'bytes');
     res.setHeader('Cache-Control', 'public, max-age=3600');
+    res.setHeader('Connection', 'keep-alive');
+    res.setHeader('Keep-Alive', 'timeout=30, max=1000');
 
     if (response.headers.has('content-length')) {
       res.setHeader('Content-Length', response.headers.get('content-length'));

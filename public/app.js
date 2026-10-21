@@ -2,7 +2,8 @@
  * MiTV — APPLE TV / YOUTUBE TV DARK CLIENT APPLICATION
  * Dual-Engine Streaming Controller (HLS.js + Sandboxed Isolated Clean-Embed),
  * Multi-Stream (1, 2, 4 Slots), Purple Audio Focus, Retractable Sidebar,
- * Parallel Latency Benchmarking & Mobile LAN Handoff.
+ * GPU Image Sharpening Engine, Audio Dynamics Compressor,
+ * Max-Bitrate HLS (1080p), Parallel Latency Benchmarking & Mobile LAN Handoff.
  */
 
 const SLOTS_COUNT = 4;
@@ -24,6 +25,50 @@ const FIT_MODES = [
   { key: 'cover', label: 'Zoom' }
 ];
 let currentFitIdx = 0;
+
+// 3 GPU Image Enhancement Modes: off, sharp, vivid
+const ENHANCE_MODES = [
+  { key: 'off', label: 'OFF', cssClass: '' },
+  { key: 'sharp', label: 'HD Nitidez', cssClass: 'filter-sharp' },
+  { key: 'vivid', label: 'Estadio Vivo', cssClass: 'filter-vivid' }
+];
+let currentEnhanceIdx = 0;
+
+// Web Audio API Audio Normalizer (DynamicsCompressorNode)
+let audioCtx = null;
+let compressorNode = null;
+const audioSourceMap = new Map(); // video element -> MediaElementAudioSourceNode
+
+function setupAudioNormalizer(videoEl) {
+  try {
+    const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+    if (!AudioContextClass) return;
+
+    if (!audioCtx) {
+      audioCtx = new AudioContextClass();
+      compressorNode = audioCtx.createDynamicsCompressor();
+      compressorNode.threshold.setValueAtTime(-24, audioCtx.currentTime); // dB
+      compressorNode.knee.setValueAtTime(30, audioCtx.currentTime);        // dB
+      compressorNode.ratio.setValueAtTime(12, audioCtx.currentTime);       // compression ratio
+      compressorNode.attack.setValueAtTime(0.003, audioCtx.currentTime);   // attack in sec
+      compressorNode.release.setValueAtTime(0.25, audioCtx.currentTime);   // release in sec
+      compressorNode.connect(audioCtx.destination);
+    }
+
+    if (audioCtx.state === 'suspended') {
+      audioCtx.resume().catch(() => {});
+    }
+
+    if (!audioSourceMap.has(videoEl)) {
+      const source = audioCtx.createMediaElementSource(videoEl);
+      source.connect(compressorNode);
+      audioSourceMap.set(videoEl, source);
+    }
+  } catch (err) {
+    // If browser security blocks AudioContext cross-origin, audio plays normally through video tag
+    console.debug('[Audio Normalizer] Info:', err.message);
+  }
+}
 
 // --------------------------------------------------------------------------
 // Initialization
@@ -72,6 +117,7 @@ function initSlots() {
       hlsInstance: null,
       currentMatch: null,
       currentOptionIdx: 0,
+      networkRecovered: false,
       mode: 'idle' // 'hls' | 'embed' | 'idle'
     });
   }
@@ -113,6 +159,12 @@ function initSlots() {
       slot.loaderEl.style.display = 'none';
       slot.errorEl.style.display = 'none';
       slot.emptyEl.style.display = 'none';
+      slot.networkRecovered = false;
+
+      // Enable Web Audio normalizer when focused
+      if (slot.index === focusedSlotIdx) {
+        setupAudioNormalizer(slot.videoEl);
+      }
     });
 
     // Iframe load event
@@ -145,6 +197,7 @@ function setFocusedSlot(targetIdx) {
         slot.videoEl.muted = false;
         slot.videoEl.volume = 1;
         slot.videoEl.play().catch(() => {});
+        setupAudioNormalizer(slot.videoEl);
       } else {
         slot.videoEl.muted = true;
       }
@@ -166,6 +219,9 @@ function setFocusedSlot(targetIdx) {
 
   // Update Server Chips for focused slot
   renderStageFooterServerChips();
+
+  // Update Quality Chip for focused slot
+  updateQualityIndicator();
 
   // Update Header title
   updateHeaderTitle();
@@ -193,7 +249,9 @@ window.addEventListener('message', (event) => {
 function setLayout(layoutNum) {
   currentLayout = String(layoutNum);
   const videoGrid = document.getElementById('videoGrid');
-  videoGrid.className = `video-grid layout-${currentLayout}`;
+  // Preserve enhancement classes
+  const enhanceClass = ENHANCE_MODES[currentEnhanceIdx].cssClass;
+  videoGrid.className = `video-grid layout-${currentLayout} ${enhanceClass}`.trim();
 
   // Update segmented control buttons
   document.querySelectorAll('#layoutSelector .seg-btn').forEach(btn => {
@@ -236,6 +294,81 @@ function cycleScreenFit() {
 }
 
 // --------------------------------------------------------------------------
+// GPU Image Enhancement Controller (OFF / HD Nitidez / Estadio Vivo)
+// --------------------------------------------------------------------------
+function cycleImageEnhance() {
+  currentEnhanceIdx = (currentEnhanceIdx + 1) % ENHANCE_MODES.length;
+  const mode = ENHANCE_MODES[currentEnhanceIdx];
+
+  const label = document.getElementById('enhanceLabel');
+  if (label) {
+    label.textContent = mode.label;
+  }
+
+  const videoGrid = document.getElementById('videoGrid');
+  videoGrid.classList.remove('filter-sharp', 'filter-vivid');
+  if (mode.cssClass) {
+    videoGrid.classList.add(mode.cssClass);
+  }
+}
+
+// --------------------------------------------------------------------------
+// Quality Indicator & Force Max 1080p Level
+// --------------------------------------------------------------------------
+function updateQualityIndicator() {
+  const qualityBtn = document.getElementById('qualityBtn');
+  const qualityLabel = document.getElementById('qualityLabel');
+  if (!qualityBtn || !qualityLabel) return;
+
+  const slot = slots[focusedSlotIdx];
+  if (!slot || slot.mode !== 'hls' || !slot.hlsInstance) {
+    qualityLabel.textContent = 'HD Auto';
+    qualityBtn.classList.remove('forced');
+    return;
+  }
+
+  const hls = slot.hlsInstance;
+  if (!hls.levels || hls.levels.length === 0) {
+    qualityLabel.textContent = 'HD Auto';
+    return;
+  }
+
+  const maxLevelIdx = hls.levels.length - 1;
+  const maxLevel = hls.levels[maxLevelIdx];
+  const maxRes = maxLevel?.height ? `${maxLevel.height}p` : '1080p';
+
+  if (hls.currentLevel === -1) {
+    qualityLabel.textContent = `Auto (${maxRes})`;
+    qualityBtn.classList.remove('forced');
+  } else {
+    const curLevel = hls.levels[hls.currentLevel];
+    const curRes = curLevel?.height ? `${curLevel.height}p` : maxRes;
+    qualityLabel.textContent = `${curRes} MAX`;
+    qualityBtn.classList.add('forced');
+  }
+}
+
+function toggleForceMaxQuality() {
+  const slot = slots[focusedSlotIdx];
+  if (!slot || slot.mode !== 'hls' || !slot.hlsInstance) return;
+
+  const hls = slot.hlsInstance;
+  if (!hls.levels || hls.levels.length === 0) return;
+
+  const maxLevelIdx = hls.levels.length - 1;
+
+  if (hls.currentLevel === -1) {
+    // Force highest bitrate / 1080p level
+    hls.currentLevel = maxLevelIdx;
+  } else {
+    // Return to Auto ABR
+    hls.currentLevel = -1;
+  }
+
+  updateQualityIndicator();
+}
+
+// --------------------------------------------------------------------------
 // Dual-Engine Stream Loader & Teardown
 // --------------------------------------------------------------------------
 function clearSlot(slotIdx) {
@@ -257,6 +390,7 @@ function clearSlot(slotIdx) {
 
   slot.currentMatch = null;
   slot.currentOptionIdx = 0;
+  slot.networkRecovered = false;
   slot.mode = 'idle';
 
   slot.titleEl.textContent = `Ranura ${slotIdx + 1}`;
@@ -266,6 +400,7 @@ function clearSlot(slotIdx) {
 
   if (focusedSlotIdx === slotIdx) {
     renderStageFooterServerChips();
+    updateQualityIndicator();
     updateHeaderTitle();
   }
 }
@@ -289,6 +424,7 @@ async function loadStreamInSlot(slotIdx, matchData, optionIndex = 0) {
 
   slot.currentMatch = matchData;
   slot.currentOptionIdx = optionIndex;
+  slot.networkRecovered = false;
   slot.emptyEl.style.display = 'none';
   slot.errorEl.style.display = 'none';
   slot.loaderText.textContent = `Sintonizando ${option.name}...`;
@@ -330,7 +466,7 @@ async function loadStreamInSlot(slotIdx, matchData, optionIndex = 0) {
   }
 }
 
-// HLS.js Setup for Native Video
+// HLS.js Setup with Max-Bitrate & Intelligent Error Recovery
 function setupSlotHls(slot, streamUrl, referer) {
   slot.iframeEl.style.display = 'none';
   slot.videoEl.style.display = 'block';
@@ -346,8 +482,11 @@ function setupSlotHls(slot, streamUrl, referer) {
     const hls = new Hls({
       enableWorker: true,
       lowLatencyMode: true,
-      backBufferLength: 30,
-      maxBufferLength: 20
+      capLevelToPlayerSize: false,        // Never downscale 1080p in multi-split mode
+      abrEwmaDefaultEstimate: 8000000,    // Assume 8 Mbps initial bandwidth for instant crisp 1080p/720p
+      maxBufferLength: 25,
+      maxMaxBufferLength: 40,
+      backBufferLength: 15
     });
 
     slot.hlsInstance = hls;
@@ -357,25 +496,48 @@ function setupSlotHls(slot, streamUrl, referer) {
     hls.on(Hls.Events.MANIFEST_PARSED, () => {
       slot.videoEl.muted = (slot.index !== focusedSlotIdx);
       slot.videoEl.play().catch(() => {});
+      updateQualityIndicator();
     });
 
+    hls.on(Hls.Events.LEVEL_SWITCHED, () => {
+      updateQualityIndicator();
+    });
+
+    // Intelligent Error Recovery
     hls.on(Hls.Events.ERROR, (event, data) => {
       if (data.fatal) {
         switch (data.type) {
           case Hls.ErrorTypes.NETWORK_ERROR:
-            hls.startLoad();
+            // Try recovering once before hopping servers
+            if (!slot.networkRecovered) {
+              console.log(`[HLS] Recuperando micro-corte de red en ranura ${slot.index + 1}...`);
+              slot.networkRecovered = true;
+              hls.startLoad();
+            } else {
+              // Network error persisted: hop to next server option
+              console.warn(`[HLS] Caída persistente de red en ranura ${slot.index + 1}, cambiando de servidor...`);
+              hls.destroy();
+              if (slot.currentMatch && slot.currentOptionIdx + 1 < slot.currentMatch.options.length) {
+                loadStreamInSlot(slot.index, slot.currentMatch, slot.currentOptionIdx + 1);
+              } else {
+                slot.loaderEl.style.display = 'none';
+                slot.errorText.textContent = 'Canal no disponible actualmente';
+                slot.errorEl.style.display = 'flex';
+              }
+            }
             break;
+
           case Hls.ErrorTypes.MEDIA_ERROR:
             hls.recoverMediaError();
             break;
+
           default:
             hls.destroy();
-            // Try next option automatically
             if (slot.currentMatch && slot.currentOptionIdx + 1 < slot.currentMatch.options.length) {
               loadStreamInSlot(slot.index, slot.currentMatch, slot.currentOptionIdx + 1);
             } else {
               slot.loaderEl.style.display = 'none';
-              slot.errorText.textContent = 'Error fatal de stream';
+              slot.errorText.textContent = 'Error de transmisión';
               slot.errorEl.style.display = 'flex';
             }
             break;
@@ -403,7 +565,6 @@ function setupSlotEmbed(slot, embedUrl) {
 
   slot.iframeEl.onload = () => {
     slot.loaderEl.style.display = 'none';
-    // Send mute state to iframe
     try {
       slot.iframeEl.contentWindow.postMessage({
         type: 'SET_MUTE',
@@ -508,7 +669,7 @@ function updateHeaderTitle() {
 }
 
 // --------------------------------------------------------------------------
-// Sidebar Programming (Matches & Channels)
+// Sidebar Programming (Matches & Channels) with exact ID matchesList
 // --------------------------------------------------------------------------
 async function fetchSchedule() {
   try {
@@ -572,7 +733,8 @@ function renderFilterChips() {
 }
 
 function renderSidebarList() {
-  const container = document.getElementById('sidebarList');
+  const container = document.getElementById('matchesList');
+  if (!container) return;
   container.innerHTML = '';
 
   const items = currentTab === 'matches' ? allMatches : allChannels;
@@ -675,6 +837,12 @@ function setupUIEventListeners() {
 
   // Aspect fit toggle
   document.getElementById('aspectFitBtn').addEventListener('click', cycleScreenFit);
+
+  // GPU Image Enhancement toggle
+  document.getElementById('enhanceBtn').addEventListener('click', cycleImageEnhance);
+
+  // Quality selector / 1080p force toggle
+  document.getElementById('qualityBtn').addEventListener('click', toggleForceMaxQuality);
 
   // Auto-fastest probe button
   document.getElementById('autoFastestBtn').addEventListener('click', probeFastestForFocusedSlot);

@@ -1,6 +1,6 @@
 /* ==========================================================================
    MiTV — APPLE TV / YOUTUBE TV DARK STUDIO DESIGN SYSTEM
-   Minimalist, Sober, Zero-AI Clutter
+   Minimalist, Sober, Zero-AI Clutter + GPU Sharpening Modes
    ========================================================================== */
 
 :root {
@@ -112,7 +112,7 @@ html, body {
   font-size: 12px;
   font-weight: 500;
   color: var(--text-secondary);
-  max-width: 280px;
+  max-width: 250px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -175,6 +175,11 @@ html, body {
   background: var(--bg-card-hover);
   color: var(--text-main);
   border-color: var(--border-active);
+}
+
+.enhance-btn strong {
+  color: var(--accent-purple-hover);
+  font-weight: 700;
 }
 
 .toggle-sidebar-btn {
@@ -254,6 +259,16 @@ html, body {
 .video-grid.layout-4 {
   grid-template-columns: 1fr 1fr;
   grid-template-rows: 1fr 1fr;
+}
+
+/* GPU Adaptive Sharpening Filters applied to media */
+#videoGrid.filter-sharp video,
+#videoGrid.filter-sharp iframe {
+  filter: url(#sports-hd-enhance) contrast(1.04) saturate(1.08);
+}
+#videoGrid.filter-vivid video,
+#videoGrid.filter-vivid iframe {
+  filter: url(#sports-hd-enhance) contrast(1.08) saturate(1.18) brightness(1.02);
 }
 
 /* Stream Slot Box */
@@ -517,6 +532,17 @@ html, body {
 .tool-chip:hover {
   background: var(--bg-card-hover);
   color: var(--text-main);
+}
+.quality-chip {
+  border-color: rgba(147, 51, 234, 0.35);
+  color: var(--text-main);
+  font-weight: 500;
+}
+.quality-chip.forced {
+  background: var(--accent-purple);
+  border-color: var(--accent-purple);
+  color: #fff;
+  font-weight: 600;
 }
 .auto-chip {
   border-color: rgba(147, 51, 234, 0.4);

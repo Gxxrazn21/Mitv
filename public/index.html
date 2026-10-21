@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <title>MiTV | Studio Deportivo Multi-Stream</title>
-  <meta name="description" content="Plataforma de transmisión deportiva en vivo de alto rendimiento estilo Apple TV / YouTube TV Dark. Multi-stream de 1 a 4 pantallas con foco de audio exclusivo.">
+  <meta name="description" content="Plataforma de transmisión deportiva en vivo de alto rendimiento estilo Apple TV / YouTube TV Dark. Multi-stream de 1 a 4 pantallas con foco de audio exclusivo y realce por GPU.">
 
   <!-- Mobile PWA Meta -->
   <link rel="manifest" href="/manifest.json">
@@ -21,9 +21,16 @@
   <!-- HLS.js for direct video streaming -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/hls.js/1.5.7/hls.min.js"></script>
 
-  <link rel="stylesheet" href="app.css?v=5.0">
+  <link rel="stylesheet" href="app.css?v=5.1">
 </head>
 <body>
+  <!-- GPU Adaptive Sharpening SVG Filter -->
+  <svg width="0" height="0" style="position:absolute; pointer-events:none; opacity:0;" aria-hidden="true">
+    <filter id="sports-hd-enhance">
+      <feConvolveMatrix order="3" kernelMatrix="0 -0.25 0 -0.25 2 -0.25 0 -0.25 0" preserveAlpha="true" />
+    </filter>
+  </svg>
+
   <!-- Top Bar: 46px Height -->
   <header class="topbar">
     <div class="topbar-left">
@@ -50,6 +57,12 @@
           <path d="M7 10l5 5 5-5"></path>
         </svg>
         <span id="aspectFitLabel">16:9</span>
+      </button>
+
+      <!-- GPU Image Enhancement Toggle -->
+      <button class="topbar-btn enhance-btn" id="enhanceBtn" title="Mejora de imagen por GPU (Nitidez y Color deportivo)">
+        <span class="sparkle-icon">✨</span>
+        <span id="enhanceText">Mejorar Imagen: <strong id="enhanceLabel">OFF</strong></span>
       </button>
 
       <!-- Fullscreen Toggle -->
@@ -224,6 +237,10 @@
           <span class="no-options-hint">Selecciona un evento para ver servidores</span>
         </div>
         <div class="footer-actions">
+          <!-- Resolution Indicator & Quality Selector -->
+          <button class="tool-chip quality-chip" id="qualityBtn" title="Calidad de video (Forzar 1080p / Auto)">
+            <span id="qualityLabel">HD Auto</span>
+          </button>
           <button class="tool-chip auto-chip" id="autoFastestBtn" title="Probar latencias y elegir el canal más rápido">
             <span>⚡ Auto-Rápido</span>
           </button>
@@ -270,8 +287,8 @@
         </div>
       </div>
 
-      <!-- Scrollable Event List -->
-      <div class="sidebar-list" id="sidebarList">
+      <!-- Scrollable Event List with synchronized ID matchesList -->
+      <div class="sidebar-list" id="matchesList">
         <div class="list-loading">Cargando eventos en vivo...</div>
       </div>
     </aside>
@@ -298,6 +315,6 @@
     </div>
   </div>
 
-  <script src="app.js?v=5.0"></script>
+  <script src="app.js?v=5.1"></script>
 </body>
 </html>
