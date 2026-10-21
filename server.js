@@ -203,7 +203,9 @@ function parseMatches(html) {
 
 function parseChannels(html) {
   const channels = [];
-  const parts = html.split(/<div class=["']menu["']>\s*<a href=["']#["']>/i);
+  if (!html || typeof html !== 'string') return channels;
+  // Support both <li><a href="#"> and <div class="menu"><a href="#">
+  const parts = html.split(/(?:<li[^>]*>|<div class=["']menu["']>)\s*<a href=["']#["']>/i);
 
   for (let i = 1; i < parts.length; i++) {
     const part = parts[i];
@@ -243,7 +245,9 @@ function parseChannels(html) {
       else if (upper.includes('WIN')) category = 'Win Sports';
       else if (upper.includes('TNT')) category = 'TNT Sports';
       else if (upper.includes('FOX')) category = 'Fox Sports';
-      else if (upper.includes('TYC') || upper.includes('GOL')) category = 'Fútbol TV';
+      else if (upper.includes('TYC') || upper.includes('GOL') || upper.includes('LIGA 1')) category = 'Fútbol TV';
+      else if (upper.includes('FORMULA 1') || upper.includes('F1')) category = 'Motorsport';
+      else if (upper.includes('TELEMUNDO') || upper.includes('UNIVERSO') || upper.includes('TUDN')) category = 'Internacionales';
 
       channels.push({
         id: 'chan-' + i,
@@ -256,21 +260,118 @@ function parseChannels(html) {
   return channels;
 }
 
+function extractFallbackChannels(homeHtml) {
+  const BASELINE_CHANNELS = [
+    { name: 'DSPORTS (DirecTV Sports)', category: 'DSPORTS', options: [
+      { name: 'Opción 1 SD', url: 'https://pirlotv.la/en-vivo/dsports.php', isHD: false },
+      { name: 'Opción 2 HD', url: 'https://pirlotv.la/eventoshd.php?r=aHR0cHM6Ly9wbGF5dmkub3JnL2RzcG9ydHNoZC5waHA=', isHD: true }
+    ]},
+    { name: 'DSPORTS 2', category: 'DSPORTS', options: [
+      { name: 'Opción 1 SD', url: 'https://pirlotv.la/en-vivo/dsports-2.php', isHD: false },
+      { name: 'Opción 2 HD', url: 'https://pirlotv.la/eventoshd.php?r=aHR0cHM6Ly9wbGF5dmkub3JnL2RzcG9ydHMyaGQucGhw', isHD: true }
+    ]},
+    { name: 'DSPORTS +', category: 'DSPORTS', options: [
+      { name: 'Opción 1 SD', url: 'https://pirlotv.la/en-vivo/dsports-plus.php', isHD: false },
+      { name: 'Opción 2 HD', url: 'https://pirlotv.la/eventoshd.php?r=aHR0cHM6Ly9wbGF5dmkub3JnL2RzcG9ydHNwbHVzaGQucGhw', isHD: true }
+    ]},
+    { name: 'ESPN', category: 'ESPN', options: [
+      { name: 'Opción 1 SD', url: 'https://pirlotv.la/en-vivo/espn.php', isHD: false },
+      { name: 'Opción 2 HD', url: 'https://pirlotv.la/eventoshd.php?r=aHR0cHM6Ly9wbGF5dmkub3JnL2VzcG5oZC5waHA=', isHD: true }
+    ]},
+    { name: 'ESPN 2', category: 'ESPN', options: [
+      { name: 'Opción 1 SD', url: 'https://pirlotv.la/en-vivo/espn-2.php', isHD: false },
+      { name: 'Opción 2 HD', url: 'https://pirlotv.la/eventoshd.php?r=aHR0cHM6Ly9wbGF5dmkub3JnL2VzcG4yaGQucGhw', isHD: true }
+    ]},
+    { name: 'ESPN 3', category: 'ESPN', options: [
+      { name: 'Opción 1 SD', url: 'https://pirlotv.la/en-vivo/espn-3.php', isHD: false },
+      { name: 'Opción 2 HD', url: 'https://pirlotv.la/eventoshd.php?r=aHR0cHM6Ly9wbGF5dmkub3JnL2VzcG4zaGQucGhw', isHD: true }
+    ]},
+    { name: 'ESPN 4', category: 'ESPN', options: [
+      { name: 'Opción 1 SD', url: 'https://pirlotv.la/en-vivo/espn-4.php', isHD: false },
+      { name: 'Opción 2 HD', url: 'https://pirlotv.la/eventoshd.php?r=aHR0cHM6Ly9wbGF5dmkub3JnL2VzcG40aGQucGhw', isHD: true }
+    ]},
+    { name: 'ESPN 5', category: 'ESPN', options: [
+      { name: 'Opción 1 SD', url: 'https://pirlotv.la/en-vivo/espn-5.php', isHD: false },
+      { name: 'Opción 2 HD', url: 'https://pirlotv.la/eventoshd.php?r=aHR0cHM6Ly9wbGF5dmkub3JnL2VzcG41aGQucGhw', isHD: true }
+    ]},
+    { name: 'ESPN Premium Argentina', category: 'ESPN', options: [
+      { name: 'Opción 1 SD', url: 'https://pirlotv.la/en-vivo/espn-premium.php', isHD: false },
+      { name: 'Opción 2 HD', url: 'https://pirlotv.la/eventoshd.php?r=aHR0cHM6Ly9wbGF5dmkub3JnL2VzcG5wcmVtaXVtaGQucGhw', isHD: true }
+    ]},
+    { name: 'TNT Sports Premium Argentina', category: 'TNT Sports', options: [
+      { name: 'Opción 1 SD', url: 'https://pirlotv.la/en-vivo/tnt-sports-argentina.php', isHD: false },
+      { name: 'Opción 2 HD', url: 'https://pirlotv.la/eventoshd.php?r=aHR0cHM6Ly9wbGF5dmkub3JnL3RudGFyZ2VudGluYWhkLnBocA==', isHD: true }
+    ]},
+    { name: 'TNT Sports Premium Chile', category: 'TNT Sports', options: [
+      { name: 'Opción 1 SD', url: 'https://pirlotv.la/en-vivo/tnt-sports-chile.php', isHD: false },
+      { name: 'Opción 2 HD', url: 'https://pirlotv.la/eventoshd.php?r=aHR0cHM6Ly9wbGF5dmkub3JnL3RudGNoaWxlaGQucGhw', isHD: true }
+    ]},
+    { name: 'Win Sports', category: 'Win Sports', options: [
+      { name: 'Opción 1 SD', url: 'https://pirlotv.la/en-vivo/win-sports.php', isHD: false },
+      { name: 'Opción 2 HD', url: 'https://pirlotv.la/eventoshd.php?r=aHR0cHM6Ly9wbGF5dmkub3JnL3dpbnNwb3J0c2hkLnBocA==', isHD: true }
+    ]},
+    { name: 'Win Sports +', category: 'Win Sports', options: [
+      { name: 'Opción 1 SD', url: 'https://pirlotv.la/en-vivo/win-sports-plus.php', isHD: false },
+      { name: 'Opción 2 HD', url: 'https://pirlotv.la/eventoshd.php?r=aHR0cHM6Ly9wbGF5dmkub3JnL3dpbnNwb3J0c3BsdXNoZC5waHA=', isHD: true }
+    ]},
+    { name: 'TUDN', category: 'Internacionales', options: [
+      { name: 'Opción 1 SD', url: 'https://pirlotv.la/en-vivo/tudn.php', isHD: false },
+      { name: 'Opción 2 HD', url: 'https://pirlotv.la/eventoshd.php?r=aHR0cHM6Ly9wbGF5dmkub3JnL3R1ZG5oZC5waHA=', isHD: true }
+    ]},
+    { name: 'Formula 1', category: 'Motorsport', options: [
+      { name: 'Opción 1 SD', url: 'https://pirlotv.la/en-vivo/formula-1.php', isHD: false },
+      { name: 'Opción 2 HD', url: 'https://pirlotv.la/eventoshd.php?r=aHR0cHM6Ly9wbGF5dmkub3JnL2Zvcm11bGExaGQucGhw', isHD: true }
+    ]},
+    { name: 'Capo Deportes 1', category: 'Capo Deportes', options: [
+      { name: 'Opción 1 SD', url: 'https://pirlotv.la/capo-deportes.php', isHD: false }
+    ]},
+    { name: 'Capo Deportes 2', category: 'Capo Deportes', options: [
+      { name: 'Opción 1 SD', url: 'https://pirlotv.la/capo-deportes-2.php', isHD: false }
+    ]}
+  ];
+
+  return BASELINE_CHANNELS.map((b, idx) => ({
+    id: 'chan-fallback-' + (idx + 1),
+    name: b.name,
+    category: b.category,
+    options: b.options
+  }));
+}
+
 async function refreshCache() {
   try {
-    const [homeRes, chanRes] = await Promise.all([
-      safeFetch('https://pirlotv.la/'),
-      safeFetch('https://pirlotv.la/canales-en-vivo.php')
-    ]);
+    let homeHtml = null;
+    let chanHtml = null;
 
-    if (homeRes.ok) {
-      const homeHtml = await homeRes.text();
+    try {
+      const homeRes = await safeFetch('https://pirlotv.la/');
+      if (homeRes.ok) homeHtml = await homeRes.text();
+    } catch (e) {
+      console.warn('[Cache] Error fetching home:', e.message);
+    }
+
+    try {
+      const chanRes = await safeFetch('https://pirlotv.la/canales-en-vivo.php');
+      if (chanRes.ok) chanHtml = await chanRes.text();
+    } catch (e) {
+      console.warn('[Cache] Error fetching canales:', e.message);
+    }
+
+    if (homeHtml) {
       cache.matches = parseMatches(homeHtml);
     }
-    if (chanRes.ok) {
-      const chanHtml = await chanRes.text();
-      cache.channels = parseChannels(chanHtml);
+
+    let parsedChannels = [];
+    if (chanHtml) {
+      parsedChannels = parseChannels(chanHtml);
     }
+
+    if (parsedChannels.length < 5) {
+      console.log(`[Cache] Canales insuficientes (${parsedChannels.length}), activando catálogo de respaldo...`);
+      parsedChannels = extractFallbackChannels(homeHtml);
+    }
+
+    cache.channels = parsedChannels;
     cache.lastUpdated = Date.now();
     console.log(`[Cache Updated] ${cache.matches.length} partidos, ${cache.channels.length} canales.`);
   } catch (err) {
@@ -351,7 +452,7 @@ function unpackDeanEdwards(packed) {
   return p.replace(/\b\w+\b/g, (token) => dict[token] !== undefined ? dict[token] : token);
 }
 
-// Extract .m3u8 stream URLs from HTML text & scripts
+// Extract .m3u8 or .mpd stream URLs from HTML text & scripts
 function extractStreamsFromHtml(html) {
   if (!html || typeof html !== 'string') return [];
   const foundUrls = new Set();
@@ -366,7 +467,48 @@ function extractStreamsFromHtml(html) {
     }
   }
 
-  // 2. Arrays: streamUrls, urls, sources
+  // 2. Streamx / Clappr dynamic playbackURL deobfuscator (eventoshd / cdplay.live)
+  const streamxMatch = html.match(/(\w+)\s*=\s*(\[\[\d+,\s*["'][A-Za-z0-9+/=]+["']\][\s\S]*?\]);\s*\1\.sort\b[\s\S]*?var\s+k\s*=\s*(\w+)\(\)\s*\+\s*(\w+)\(\);[\s\S]*?function\s+\3\(\)\s*\{\s*return\s*(\d+);[\s\S]*?function\s+\4\(\)\s*\{\s*return\s*(\d+);/);
+  if (streamxMatch) {
+    try {
+      const rawArr = JSON.parse(streamxMatch[2]);
+      const k = parseInt(streamxMatch[5], 10) + parseInt(streamxMatch[6], 10);
+      rawArr.sort((a, b) => a[0] - b[0]);
+      let decoded = '';
+      rawArr.forEach(e => {
+        const v = e[1];
+        const atobVal = Buffer.from(v, 'base64').toString('binary');
+        const num = parseInt(atobVal.replace(/\D/g, ''), 10);
+        decoded += String.fromCharCode(num - k);
+      });
+      if (decoded.startsWith('http') && (decoded.includes('.m3u8') || decoded.includes('.mpd'))) {
+        foundUrls.add(decoded);
+      }
+    } catch (e) {}
+  }
+
+  // 3. Shaka Player player.load(...) detection (canales HD)
+  const shakaRegex = /player\.load\s*\(\s*["']([^"']+\.(?:m3u8|mpd)[^"']*)["']/gi;
+  let shakaMatch;
+  while ((shakaMatch = shakaRegex.exec(html)) !== null) {
+    foundUrls.add(shakaMatch[1].replace(/\\\//g, '/'));
+  }
+
+  // 4. Variables: playbackURL, source, file, hlsUrl, streamUrl, src
+  const varRegex = /(?:playbackURL|source|file|hlsUrl|streamUrl|src)\s*[:=]\s*["'](https?:\/\/[^"']+\.m3u8[^"']*)["']/gi;
+  let varMatch;
+  while ((varMatch = varRegex.exec(html)) !== null) {
+    foundUrls.add(varMatch[1].replace(/\\\//g, '/'));
+  }
+
+  // 5. General variable capture: var/let/const name = "https://...m3u8"
+  const gvRegex = /(?:var|let|const)\s+\w+\s*=\s*["'](https?:\/\/[^"']+\.m3u8[^"']*)["']/gi;
+  let gvMatch;
+  while ((gvMatch = gvRegex.exec(html)) !== null) {
+    foundUrls.add(gvMatch[1].replace(/\\\//g, '/'));
+  }
+
+  // 6. Arrays: streamUrls, urls, sources
   const arrRegex = /(?:streamUrls|urls|sources)\s*=\s*(\[[^\]]+\])/gi;
   let arrMatch;
   while ((arrMatch = arrRegex.exec(html)) !== null) {
@@ -380,26 +522,19 @@ function extractStreamsFromHtml(html) {
     } catch (e) {}
   }
 
-  // 3. Variables: playbackURL, source, file, hlsUrl, streamUrl, src
-  const varRegex = /(?:playbackURL|source|file|hlsUrl|streamUrl|src)\s*[:=]\s*["'](https?:\/\/[^"']+\.m3u8[^"']*)["']/gi;
-  let varMatch;
-  while ((varMatch = varRegex.exec(html)) !== null) {
-    foundUrls.add(varMatch[1].replace(/\\\//g, '/'));
-  }
-
-  // 4. Server-side atob calls & Base64 strings
-  const atobRegex = /atob\s*\(\s*["']([A-Za-z0-9+/=]{20,})["']\s*\)/g;
+  // 7. Server-side atob calls with flexible quotes and spaces
+  const atobRegex = /atob\s*\(\s*['"]\s*([A-Za-z0-9+/=]{20,})\s*['"]\s*\)/g;
   let atobMatch;
   while ((atobMatch = atobRegex.exec(html)) !== null) {
     try {
-      const dec = Buffer.from(atobMatch[1], 'base64').toString('utf8');
-      if (dec.startsWith('http') && dec.includes('.m3u8')) {
+      const dec = Buffer.from(atobMatch[1].trim(), 'base64').toString('utf8');
+      if (dec.startsWith('http') && (dec.includes('.m3u8') || dec.includes('.mpd'))) {
         foundUrls.add(dec);
       }
     } catch (e) {}
   }
 
-  // 5. Packed scripts
+  // 8. Packed scripts
   const packedMatch = html.match(/eval\s*\(\s*function\s*\(\s*p\s*,\s*a\s*,\s*c\s*,\s*k\s*,\s*e\s*,\s*d[\s\S]*?\)\s*\)/);
   if (packedMatch) {
     const unpacked = unpackDeanEdwards(packedMatch[0]);
@@ -409,7 +544,7 @@ function extractStreamsFromHtml(html) {
     }
   }
 
-  // 6. Raw .m3u8 URL in quotes
+  // 9. Raw .m3u8 URL in quotes
   const rawRegex = /["'](https?:\/\/[^"'\s<>\\]+\.m3u8(?:\?[^"'\s<>\\]*)?)["']/gi;
   let rawMatch;
   while ((rawMatch = rawRegex.exec(html)) !== null) {
@@ -965,27 +1100,19 @@ app.get('/player/clean-embed', async (req, res) => {
 
     let html = await response.text();
 
-    // 1. Remove anti-iframe and trap scripts
-    html = html.replace(/<script>if\s*\(\s*window\s*==\s*window\.top\s*\)\s*\{\s*document\.location\s*=\s*["']\/["'];?\s*\}\s*<\/script>/gi, '');
-    html = html.replace(/location\[t\[5\]\]\s*=\s*["']\/block\.html["']/gi, '/* blocked */');
-    html = html.replace(/location\.href\s*=\s*["']\/block\.html["']/gi, '/* blocked */');
-    html = html.replace(/<script[^>]*>[\s\S]*?t=\["sandbox"[\s\S]*?<\/script>/gi, '');
-    html = html.replace(/<script[^>]*>[\s\S]*?hasAttribute\("sandbox"\)[\s\S]*?<\/script>/gi, '');
+    // 1. Remove anti-iframe and trap instructions inside scripts without destroying player code
+    html = html
+      .replace(/if\s*\(\s*window\s*==\s*window\.top\s*\)\s*\{[^}]*\}/gi, '')
+      .replace(/location\[t\[5\]\]\s*=\s*["'][^"']*(?:block|sandbox)\.html["']/gi, 'void 0')
+      .replace(/location\.href\s*=\s*["'][^"']*(?:block|sandbox)\.html["']/gi, 'void 0')
+      .replace(/window\.location\s*=\s*["'][^"']*(?:block|sandbox)\.html["']/gi, 'void 0')
+      .replace(/hasAttribute\(\s*["']sandbox["']\s*\)/gi, 'false')
+      .replace(/aclib\.runPop\([\s\S]*?\);?/gi, '');
 
-    // 2. Remove known ad networks & popunder scripts
+    // 2. Remove external ad scripts only (keep player & clappr/shaka engines intact)
     html = html.replace(/<script\s+type=["']text\/javascript["']\s+data-cfasync=["']false["']>[\s\S]*?<\/script>/gi, '');
-    html = html.replace(/<script[^>]*src=["'][^"']*(?:tag\.min\.js|aclib|waust|intellipopup|cloudfront|pa-H_qzm|histats|llvpn|r2\.dev|dtscout|popads|adcash|exoclick|juicyads|propeller)[^"']*["'][^>]*>[\s\S]*?<\/script>/gi, '');
+    html = html.replace(/<script[^>]*src=["'][^"']*(?:aclib|histats|waust|popads|adcash|exoclick|dtscout|llvpn|tag\.min\.js|intellipopup|pa-H_qzm|r2\.dev|propeller)[^"']*["'][^>]*>[\s\S]*?<\/script>/gi, '');
     html = html.replace(/<script[^>]*id=["'](?:_wauksz|aclib)["']>[\s\S]*?<\/script>/gi, '');
-    html = html.replace(/aclib\.runPop\([\s\S]*?\);?/gi, '');
-
-    const AD_KEYWORDS = ['popunder', 'popads', 'aclib', 'histats', 'dtscout', 'clickable', 'adcash', 'exoclick', 'juicyads', 'propeller', 'bet365', '1xbet', 'onclick', 'onmousedown', 'window.open', 'devtools-detector', 'disable-devtool'];
-    html = html.replace(/<script\b[^>]*>([\s\S]*?)<\/script>/gi, (allScript, content) => {
-      const lower = content.toLowerCase();
-      if (AD_KEYWORDS.some(kw => lower.includes(kw))) {
-        return '<!-- blocked ad script -->';
-      }
-      return allScript;
-    });
 
     // 3. Rewrite internal iframes to route through clean-embed with sandbox
     html = html.replace(/<iframe\b([^>]*)\bsrc=["']([^"']+)["']([^>]*)>/gi, (match, prefix, srcUrl, suffix) => {
@@ -1016,11 +1143,15 @@ app.get('/player/clean-embed', async (req, res) => {
           height: 100vh !important;
           max-width: 100vw !important;
           max-height: 100vh !important;
-          object-fit: contain !important;
-          z-index: 100 !important;
-          background: #000 !important;
+          border: none !important;
+          z-index: 10 !important;
         }
-        a, .banner, #chat, .chat-box, div[style*="z-index: 2147483647"], div[style*="z-index:999999"], div[class*="banner"] {
+        #player, #clappr {
+          display: block !important;
+          width: 100% !important;
+          height: 100% !important;
+        }
+        .banner, #chat, .chat-box, div[style*="z-index: 2147483647"], div[style*="z-index:999999"], div[class*="banner"] {
           display: none !important;
           pointer-events: none !important;
         }

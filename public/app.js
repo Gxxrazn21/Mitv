@@ -328,6 +328,11 @@ function updateQualityIndicator() {
 
   const slot = slots[focusedSlotIdx];
   if (!slot || slot.mode !== 'hls' || !slot.hlsInstance) {
+    if (slot && slot.mode === 'embed') {
+      qualityLabel.textContent = 'HD 1080p';
+      qualityBtn.classList.add('forced');
+      return;
+    }
     qualityLabel.textContent = 'HD Auto';
     qualityBtn.classList.remove('forced');
     return;
@@ -575,6 +580,9 @@ function setupSlotEmbed(slot, embedUrl) {
 
   slot.iframeEl.onload = () => {
     slot.loaderEl.style.display = 'none';
+    slot.errorEl.style.display = 'none';
+    slot.emptyEl.style.display = 'none';
+    updateQualityIndicator();
     try {
       slot.iframeEl.contentWindow.postMessage({
         type: 'SET_MUTE',
