@@ -26,13 +26,13 @@ const FIT_MODES = [
 ];
 let currentFitIdx = 0;
 
-// 3 GPU Image Enhancement Modes: off, sharp, vivid
+// 3 GPU Image Enhancement Modes: sharp (default), vivid, off
 const ENHANCE_MODES = [
-  { key: 'off', label: 'OFF', cssClass: '' },
-  { key: 'sharp', label: 'HD Nitidez', cssClass: 'filter-sharp' },
-  { key: 'vivid', label: 'Estadio Vivo', cssClass: 'filter-vivid' }
+  { key: 'sharp', label: 'HD Nitidez', cssClass: 'enhance-sharp' },
+  { key: 'vivid', label: 'Estadio Vivo', cssClass: 'enhance-vivid' },
+  { key: 'off', label: 'OFF', cssClass: '' }
 ];
-let currentEnhanceIdx = 0;
+let currentEnhanceIdx = 0; // Starts with HD Nitidez by default
 
 // Web Audio API Audio Normalizer (DynamicsCompressorNode)
 let audioCtx = null;
@@ -77,6 +77,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   initSlots();
   setupUIEventListeners();
   setupKeyboardShortcuts();
+  applyEnhanceMode();
 
   await Promise.all([
     fetchSchedule(),
@@ -294,22 +295,27 @@ function cycleScreenFit() {
 }
 
 // --------------------------------------------------------------------------
-// GPU Image Enhancement Controller (OFF / HD Nitidez / Estadio Vivo)
+// GPU Image Enhancement Controller (HD Nitidez / Estadio Vivo / OFF)
 // --------------------------------------------------------------------------
-function cycleImageEnhance() {
-  currentEnhanceIdx = (currentEnhanceIdx + 1) % ENHANCE_MODES.length;
+function applyEnhanceMode() {
   const mode = ENHANCE_MODES[currentEnhanceIdx];
-
   const label = document.getElementById('enhanceLabel');
   if (label) {
     label.textContent = mode.label;
   }
 
   const videoGrid = document.getElementById('videoGrid');
-  videoGrid.classList.remove('filter-sharp', 'filter-vivid');
-  if (mode.cssClass) {
-    videoGrid.classList.add(mode.cssClass);
+  if (videoGrid) {
+    videoGrid.classList.remove('enhance-sharp', 'enhance-vivid', 'filter-sharp', 'filter-vivid');
+    if (mode.cssClass) {
+      videoGrid.classList.add(mode.cssClass);
+    }
   }
+}
+
+function cycleImageEnhance() {
+  currentEnhanceIdx = (currentEnhanceIdx + 1) % ENHANCE_MODES.length;
+  applyEnhanceMode();
 }
 
 // --------------------------------------------------------------------------
@@ -482,10 +488,10 @@ function setupSlotHls(slot, streamUrl, referer) {
     const hls = new Hls({
       enableWorker: true,
       lowLatencyMode: true,
-      capLevelToPlayerSize: false,        // Never downscale 1080p in multi-split mode
-      abrEwmaDefaultEstimate: 8000000,    // Assume 8 Mbps initial bandwidth for instant crisp 1080p/720p
-      maxBufferLength: 25,
-      maxMaxBufferLength: 40,
+      capLevelToPlayerSize: false, // CLAVE: Impide que al dividir en 2 o 4 pantallas baje la calidad a 360p/480p
+      abrEwmaDefaultEstimate: 10000000, // Fuerza estimación alta de ancho de banda (10 Mbps)
+      maxBufferLength: 30,
+      maxMaxBufferLength: 45,
       backBufferLength: 15
     });
 
@@ -494,6 +500,10 @@ function setupSlotHls(slot, streamUrl, referer) {
     hls.attachMedia(slot.videoEl);
 
     hls.on(Hls.Events.MANIFEST_PARSED, () => {
+      // Si existen varios niveles de calidad, seleccionar explícitamente el más alto disponible
+      if (hls.levels && hls.levels.length > 0) {
+        hls.currentLevel = hls.levels.length - 1;
+      }
       slot.videoEl.muted = (slot.index !== focusedSlotIdx);
       slot.videoEl.play().catch(() => {});
       updateQualityIndicator();

@@ -262,13 +262,22 @@ html, body {
 }
 
 /* GPU Adaptive Sharpening Filters applied to media */
+#videoGrid.enhance-sharp video,
+#videoGrid.enhance-sharp iframe,
+.video-grid.enhance-sharp video,
+.video-grid.enhance-sharp iframe,
 #videoGrid.filter-sharp video,
 #videoGrid.filter-sharp iframe {
-  filter: url(#sports-hd-enhance) contrast(1.04) saturate(1.08);
+  filter: url(#sports-hd-enhance) contrast(1.06) saturate(1.1) !important;
 }
+
+#videoGrid.enhance-vivid video,
+#videoGrid.enhance-vivid iframe,
+.video-grid.enhance-vivid video,
+.video-grid.enhance-vivid iframe,
 #videoGrid.filter-vivid video,
 #videoGrid.filter-vivid iframe {
-  filter: url(#sports-hd-enhance) contrast(1.08) saturate(1.18) brightness(1.02);
+  filter: url(#sports-hd-enhance) contrast(1.12) saturate(1.25) brightness(1.03) !important;
 }
 
 /* Stream Slot Box */

@@ -21,7 +21,7 @@
   <!-- HLS.js for direct video streaming -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/hls.js/1.5.7/hls.min.js"></script>
 
-  <link rel="stylesheet" href="app.css?v=5.1">
+  <link rel="stylesheet" href="app.css?v=5.2">
 </head>
 <body>
   <!-- GPU Adaptive Sharpening SVG Filter -->
@@ -62,7 +62,7 @@
       <!-- GPU Image Enhancement Toggle -->
       <button class="topbar-btn enhance-btn" id="enhanceBtn" title="Mejora de imagen por GPU (Nitidez y Color deportivo)">
         <span class="sparkle-icon">✨</span>
-        <span id="enhanceText">Mejorar Imagen: <strong id="enhanceLabel">OFF</strong></span>
+        <span id="enhanceText">Mejorar Imagen: <strong id="enhanceLabel">HD Nitidez</strong></span>
       </button>
 
       <!-- Fullscreen Toggle -->
@@ -99,8 +99,8 @@
   <main class="app-stage">
     <!-- Left Area: Video Stage (Flex: 1) -->
     <section class="stage" id="stage">
-      <!-- 4-Slot Multi-Stream Video Grid -->
-      <div class="video-grid layout-1" id="videoGrid">
+      <!-- 4-Slot Multi-Stream Video Grid (Defaults to HD Nitidez GPU filter) -->
+      <div class="video-grid layout-1 enhance-sharp" id="videoGrid">
         <!-- SLOT 0 -->
         <div class="stream-slot active-audio" id="slot-0" data-slot="0">
           <div class="slot-audio-badge">
@@ -315,6 +315,6 @@
     </div>
   </div>
 
-  <script src="app.js?v=5.1"></script>
+  <script src="app.js?v=5.2"></script>
 </body>
 </html>
