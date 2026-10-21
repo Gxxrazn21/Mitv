@@ -110,12 +110,13 @@
           <div class="slot-floating-bar">
             <span class="slot-title">Ranura 1</span>
             <div class="slot-actions">
+              <button class="slot-mini-btn slot-playpause" title="Pausar / Reanudar">❚❚</button>
               <button class="slot-mini-btn slot-reload" title="Recargar">↻</button>
               <button class="slot-mini-btn slot-close" title="Cerrar">✕</button>
             </div>
           </div>
           <div class="slot-media-box">
-            <video class="slot-video" playsinline controls preload="auto"></video>
+            <video class="slot-video" playsinline preload="auto"></video>
             <iframe class="slot-iframe" name="slot-0" sandbox="allow-scripts allow-same-origin allow-forms allow-presentation" allow="autoplay; fullscreen; encrypted-media; picture-in-picture" allowfullscreen="true"></iframe>
             <div class="slot-overlay slot-loader" style="display:none;">
               <div class="loader-spinner"></div>
@@ -142,12 +143,13 @@
           <div class="slot-floating-bar">
             <span class="slot-title">Ranura 2</span>
             <div class="slot-actions">
+              <button class="slot-mini-btn slot-playpause" title="Pausar / Reanudar">❚❚</button>
               <button class="slot-mini-btn slot-reload" title="Recargar">↻</button>
               <button class="slot-mini-btn slot-close" title="Cerrar">✕</button>
             </div>
           </div>
           <div class="slot-media-box">
-            <video class="slot-video" playsinline controls preload="auto"></video>
+            <video class="slot-video" playsinline preload="auto"></video>
             <iframe class="slot-iframe" name="slot-1" sandbox="allow-scripts allow-same-origin allow-forms allow-presentation" allow="autoplay; fullscreen; encrypted-media; picture-in-picture" allowfullscreen="true"></iframe>
             <div class="slot-overlay slot-loader" style="display:none;">
               <div class="loader-spinner"></div>
@@ -174,12 +176,13 @@
           <div class="slot-floating-bar">
             <span class="slot-title">Ranura 3</span>
             <div class="slot-actions">
+              <button class="slot-mini-btn slot-playpause" title="Pausar / Reanudar">❚❚</button>
               <button class="slot-mini-btn slot-reload" title="Recargar">↻</button>
               <button class="slot-mini-btn slot-close" title="Cerrar">✕</button>
             </div>
           </div>
           <div class="slot-media-box">
-            <video class="slot-video" playsinline controls preload="auto"></video>
+            <video class="slot-video" playsinline preload="auto"></video>
             <iframe class="slot-iframe" name="slot-2" sandbox="allow-scripts allow-same-origin allow-forms allow-presentation" allow="autoplay; fullscreen; encrypted-media; picture-in-picture" allowfullscreen="true"></iframe>
             <div class="slot-overlay slot-loader" style="display:none;">
               <div class="loader-spinner"></div>
@@ -206,12 +209,13 @@
           <div class="slot-floating-bar">
             <span class="slot-title">Ranura 4</span>
             <div class="slot-actions">
+              <button class="slot-mini-btn slot-playpause" title="Pausar / Reanudar">❚❚</button>
               <button class="slot-mini-btn slot-reload" title="Recargar">↻</button>
               <button class="slot-mini-btn slot-close" title="Cerrar">✕</button>
             </div>
           </div>
           <div class="slot-media-box">
-            <video class="slot-video" playsinline controls preload="auto"></video>
+            <video class="slot-video" playsinline preload="auto"></video>
             <iframe class="slot-iframe" name="slot-3" sandbox="allow-scripts allow-same-origin allow-forms allow-presentation" allow="autoplay; fullscreen; encrypted-media; picture-in-picture" allowfullscreen="true"></iframe>
             <div class="slot-overlay slot-loader" style="display:none;">
               <div class="loader-spinner"></div>
@@ -237,6 +241,11 @@
           <span class="no-options-hint">Selecciona un evento para ver servidores</span>
         </div>
         <div class="footer-actions">
+          <!-- Play / Pause Dedicated Toggle -->
+          <button class="tool-chip playpause-chip" id="playPauseFocusedBtn" title="Pausar / Reanudar pantalla activa (Espacio)">
+            <span id="playPauseFocusedIcon">❚❚</span>
+            <span id="playPauseFocusedText">Pausar</span>
+          </button>
           <!-- Resolution Indicator & Quality Selector -->
           <button class="tool-chip quality-chip" id="qualityBtn" title="Calidad de video (Forzar 1080p / Auto)">
             <span id="qualityLabel">HD Auto</span>

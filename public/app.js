@@ -112,6 +112,7 @@ function initSlots() {
       errorEl: slotEl.querySelector('.slot-error'),
       errorText: slotEl.querySelector('.error-text'),
       emptyEl: slotEl.querySelector('.slot-empty'),
+      playPauseBtn: slotEl.querySelector('.slot-playpause'),
       reloadBtn: slotEl.querySelector('.slot-reload'),
       closeBtn: slotEl.querySelector('.slot-close'),
       retryBtn: slotEl.querySelector('.slot-retry-btn'),
@@ -121,17 +122,60 @@ function initSlots() {
       networkRecovered: false,
       networkRetryCount: 0,
       abortController: null,
+      isUserPaused: false,
       mode: 'idle' // 'hls' | 'embed' | 'idle'
     });
   }
 
   // Bind slot interactions
   slots.forEach(slot => {
-    // Clicking slot selects it as the active audio slot
-    slot.slotEl.addEventListener('click', (e) => {
-      if (!e.target.closest('.slot-actions') && e.target.tagName !== 'BUTTON') {
+    // Dedicated Play/Pause button on floating bar
+    if (slot.playPauseBtn) {
+      slot.playPauseBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        toggleSlotPlayPause(slot);
+      });
+    }
+
+    // Unified slot activation handler: transfers active audio focus without ever pausing video
+    const handleSlotActivation = (e) => {
+      // Ignore clicks on control buttons (reload, close, play/pause)
+      if (e.target.closest('.slot-actions') || e.target.closest('.slot-mini-btn') || e.target.tagName === 'BUTTON') {
+        return;
+      }
+
+      // Prevent native browser default click handling on <video>
+      if (e.target.tagName === 'VIDEO') {
+        e.preventDefault();
+      }
+
+      // Instant focus switch if clicking an inactive slot
+      if (focusedSlotIdx !== slot.index) {
         setFocusedSlot(slot.index);
       }
+
+      // Ensure the clicked slot remains playing and is not paused by the click
+      if (slot.mode === 'hls' && slot.videoEl && !slot.isUserPaused) {
+        if (slot.videoEl.paused) {
+          slot.videoEl.play().catch(() => {});
+        }
+      }
+    };
+
+    // Use pointerdown for instantaneous, zero-latency visual outline and audio switch
+    slot.slotEl.addEventListener('pointerdown', (e) => {
+      if (e.target.closest('.slot-actions') || e.target.closest('.slot-mini-btn') || e.target.tagName === 'BUTTON') {
+        return;
+      }
+      if (focusedSlotIdx !== slot.index) {
+        setFocusedSlot(slot.index);
+      }
+    });
+
+    slot.slotEl.addEventListener('click', handleSlotActivation);
+    slot.videoEl.addEventListener('click', (e) => {
+      e.preventDefault();
+      handleSlotActivation(e);
     });
 
     // Reload button
@@ -169,6 +213,24 @@ function initSlots() {
       if (slot.index === focusedSlotIdx) {
         setupAudioNormalizer(slot.videoEl);
       }
+      updatePlayPauseUI(slot);
+    });
+
+    // Safeguard: if the browser pauses the video without user clicking dedicated pause button,
+    // immediately resume playback!
+    slot.videoEl.addEventListener('pause', () => {
+      if (!slot.isUserPaused && slot.mode === 'hls' && slot.currentMatch) {
+        requestAnimationFrame(() => {
+          if (!slot.isUserPaused && slot.videoEl.paused) {
+            slot.videoEl.play().catch(() => {});
+          }
+        });
+      }
+      updatePlayPauseUI(slot);
+    });
+
+    slot.videoEl.addEventListener('play', () => {
+      updatePlayPauseUI(slot);
     });
 
     // Iframe load event
@@ -192,18 +254,26 @@ function setFocusedSlot(targetIdx) {
   slots.forEach(slot => {
     const isFocused = (slot.index === targetIdx);
 
-    // Purple outline & glow
+    // Instant visual indication: Purple outline & glow
     slot.slotEl.classList.toggle('active-audio', isFocused);
 
     // Audio Muting Logic: ONLY focused slot produces sound
     if (slot.mode === 'hls' && slot.videoEl) {
       if (isFocused) {
+        // Activate audio on target screen
         slot.videoEl.muted = false;
         slot.videoEl.volume = 1;
-        slot.videoEl.play().catch(() => {});
+        // Never pause; ensure active playback continues
+        if (!slot.isUserPaused && slot.videoEl.paused) {
+          slot.videoEl.play().catch(() => {});
+        }
         setupAudioNormalizer(slot.videoEl);
       } else {
+        // Mute inactive screens without pausing them; keep all streams fluid
         slot.videoEl.muted = true;
+        if (!slot.isUserPaused && slot.videoEl.paused && slot.currentMatch) {
+          slot.videoEl.play().catch(() => {});
+        }
       }
     } else if (slot.mode === 'embed' && slot.iframeEl && slot.iframeEl.contentWindow) {
       try {
@@ -227,11 +297,52 @@ function setFocusedSlot(targetIdx) {
   // Update Quality Chip for focused slot
   updateQualityIndicator();
 
+  // Update Footer Play/Pause button for the newly focused slot
+  updatePlayPauseUI(slots[targetIdx]);
+
   // Update Header title
   updateHeaderTitle();
 
   // Highlight active match in sidebar
   highlightActiveMatchInSidebar();
+}
+
+// --------------------------------------------------------------------------
+// Dedicated Play / Pause Controller
+// --------------------------------------------------------------------------
+function toggleSlotPlayPause(slot) {
+  if (!slot) return;
+  if (slot.mode === 'hls' && slot.videoEl) {
+    if (slot.videoEl.paused) {
+      slot.isUserPaused = false;
+      slot.videoEl.play().catch(() => {});
+    } else {
+      slot.isUserPaused = true;
+      slot.videoEl.pause();
+    }
+    updatePlayPauseUI(slot);
+  }
+}
+
+function updatePlayPauseUI(slot) {
+  if (!slot) return;
+  const isPaused = slot.videoEl ? slot.videoEl.paused : false;
+
+  // Mini-button on slot floating bar
+  if (slot.playPauseBtn) {
+    slot.playPauseBtn.textContent = isPaused ? '▶' : '❚❚';
+    slot.playPauseBtn.title = isPaused ? 'Reanudar' : 'Pausar';
+  }
+
+  // Footer play/pause button (only reflects the focused slot)
+  if (slot.index === focusedSlotIdx) {
+    const iconEl = document.getElementById('playPauseFocusedIcon');
+    const textEl = document.getElementById('playPauseFocusedText');
+    if (iconEl && textEl) {
+      iconEl.textContent = isPaused ? '▶' : '❚❚';
+      textEl.textContent = isPaused ? 'Reanudar' : 'Pausar';
+    }
+  }
 }
 
 // Listen for messages from sandboxed iframes
@@ -412,7 +523,9 @@ function clearSlot(slotIdx) {
   slot.currentOptionIdx = 0;
   slot.networkRecovered = false;
   slot.networkRetryCount = 0;
+  slot.isUserPaused = false;
   slot.mode = 'idle';
+  updatePlayPauseUI(slot);
 
   slot.titleEl.textContent = `Ranura ${slotIdx + 1}`;
   slot.loaderEl.style.display = 'none';
@@ -455,6 +568,8 @@ async function loadStreamInSlot(slotIdx, matchData, optionIndex = 0) {
   slot.currentOptionIdx = optionIndex;
   slot.networkRecovered = false;
   slot.networkRetryCount = 0;
+  slot.isUserPaused = false;
+  updatePlayPauseUI(slot);
   slot.emptyEl.style.display = 'none';
   slot.errorEl.style.display = 'none';
   slot.loaderText.textContent = `Sintonizando ${option.name}...`;
@@ -898,6 +1013,17 @@ function setupUIEventListeners() {
   // Quality selector / 1080p force toggle
   document.getElementById('qualityBtn').addEventListener('click', toggleForceMaxQuality);
 
+  // Dedicated Play / Pause button in footer
+  const playPauseFocusedBtn = document.getElementById('playPauseFocusedBtn');
+  if (playPauseFocusedBtn) {
+    playPauseFocusedBtn.addEventListener('click', () => {
+      const slot = slots[focusedSlotIdx];
+      if (slot) {
+        toggleSlotPlayPause(slot);
+      }
+    });
+  }
+
   // Auto-fastest probe button
   document.getElementById('autoFastestBtn').addEventListener('click', probeFastestForFocusedSlot);
 
@@ -1013,9 +1139,8 @@ function setupKeyboardShortcuts() {
     if (e.code === 'Space') {
       e.preventDefault();
       const slot = slots[focusedSlotIdx];
-      if (slot && slot.videoEl) {
-        if (slot.videoEl.paused) slot.videoEl.play().catch(() => {});
-        else slot.videoEl.pause();
+      if (slot) {
+        toggleSlotPlayPause(slot);
       }
     }
 

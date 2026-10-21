@@ -381,6 +381,21 @@ video::-webkit-media-controls {
   background: var(--accent-purple);
   color: #fff;
 }
+.slot-mini-btn.slot-playpause {
+  font-size: 10px;
+  font-weight: 700;
+  min-width: 22px;
+  text-align: center;
+}
+.playpause-chip {
+  font-weight: 600;
+  color: var(--text-main);
+  background: var(--bg-card);
+}
+.playpause-chip:hover {
+  background: var(--bg-card-hover);
+  border-color: var(--border-active);
+}
 
 /* Media Box */
 .slot-media-box {
