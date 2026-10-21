@@ -1,76 +1,186 @@
+/**
+ * MiTV - Advanced CLI Stream Probe & Diagnostics Tool
+ * Tests stream deobfuscation, multi-hop iframe traversal, and HLS manifest availability.
+ */
+
+const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
+
+function normalizeSourceUrl(rawUrl, base = 'https://pirlotv.la/') {
+  if (!rawUrl || typeof rawUrl !== 'string') return null;
+  let trimmed = rawUrl.trim();
+  if (!trimmed || trimmed === 'about:blank') return null;
+  if (trimmed.startsWith('//')) trimmed = 'https:' + trimmed;
+
+  const b64Match = trimmed.match(/[?&]r=([a-zA-Z0-9+/=]+)/);
+  if (b64Match) {
+    try {
+      const decodedParam = decodeURIComponent(b64Match[1]);
+      const targetFromB64 = Buffer.from(decodedParam, 'base64').toString('utf8');
+      if (targetFromB64 && targetFromB64.startsWith('http')) {
+        return targetFromB64;
+      }
+    } catch (e) {}
+  }
+
+  try {
+    return new URL(trimmed, base).href;
+  } catch (e) {
+    return null;
+  }
+}
+
+async function safeFetchWithTimeout(url, headers = {}, timeoutMs = 8000) {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(url, {
+      headers: {
+        'User-Agent': USER_AGENT,
+        ...headers
+      },
+      signal: controller.signal,
+      redirect: 'follow'
+    });
+    return res;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
+function extractStreamsFromHtml(html) {
+  if (!html || typeof html !== 'string') return [];
+  const found = new Set();
+
+  // 1. Streamx dynamic playbackURL deobfuscator
+  const streamxMatch = html.match(/(\w+)\s*=\s*(\[\[\d+,\s*["'][A-Za-z0-9+/=]+["']\][\s\S]*?\]);\s*\1\.sort\b[\s\S]*?var\s+k\s*=\s*(\w+)\(\)\s*\+\s*(\w+)\(\);[\s\S]*?function\s+\3\(\)\s*\{\s*return\s*(\d+);[\s\S]*?function\s+\4\(\)\s*\{\s*return\s*(\d+);/);
+  if (streamxMatch) {
+    try {
+      const rawArr = JSON.parse(streamxMatch[2]);
+      const k = parseInt(streamxMatch[5], 10) + parseInt(streamxMatch[6], 10);
+      rawArr.sort((a, b) => a[0] - b[0]);
+      let decoded = '';
+      rawArr.forEach(e => {
+        const v = e[1];
+        const atobVal = Buffer.from(v, 'base64').toString('binary');
+        const num = parseInt(atobVal.replace(/\D/g, ''), 10);
+        decoded += String.fromCharCode(num - k);
+      });
+      if (decoded.startsWith('http') && (decoded.includes('.m3u8') || decoded.includes('.mpd'))) {
+        found.add(decoded);
+      }
+    } catch (e) {}
+  }
+
+  // 2. Shaka Player player.load(...)
+  const shakaRegex = /player\.load\s*\(\s*["']([^"']+\.(?:m3u8|mpd)[^"']*)["']/gi;
+  let shakaMatch;
+  while ((shakaMatch = shakaRegex.exec(html)) !== null) {
+    found.add(shakaMatch[1].replace(/\\\//g, '/'));
+  }
+
+  // 3. Variables: playbackURL, source, file, hlsUrl, streamUrl, src
+  const varRegex = /(?:playbackURL|source|file|hlsUrl|streamUrl|src)\s*[:=]\s*["'](https?:\/\/[^"']+\.m3u8[^"']*)["']/gi;
+  let varMatch;
+  while ((varMatch = varRegex.exec(html)) !== null) {
+    found.add(varMatch[1].replace(/\\\//g, '/'));
+  }
+
+  // 4. General var declarations
+  const gvRegex = /(?:var|let|const)\s+\w+\s*=\s*["'](https?:\/\/[^"']+\.m3u8[^"']*)["']/gi;
+  let gvMatch;
+  while ((gvMatch = gvRegex.exec(html)) !== null) {
+    found.add(gvMatch[1].replace(/\\\//g, '/'));
+  }
+
+  // 5. Raw m3u8
+  const rawRegex = /["'](https?:\/\/[^"'\s<>\\]+\.m3u8(?:\?[^"'\s<>\\]*)?)["']/gi;
+  let rawMatch;
+  while ((rawMatch = rawRegex.exec(html)) !== null) {
+    found.add(rawMatch[1]);
+  }
+
+  return Array.from(found);
+}
+
+function pickBestIframe(html, currentUrl) {
+  if (!html) return null;
+  const cleanHtml = html.replace(/<!--[\s\S]*?-->/g, '');
+  const matches = [...cleanHtml.matchAll(/<iframe[^>]+src=["']([^"']+)["']/gi)].map(m => m[1]);
+  const valid = matches.filter(src => {
+    const lower = src.toLowerCase();
+    return !['chat', 'ads', 'doubleclick', 'facebook', 'twitter', 'histats', 'about:blank'].some(b => lower.includes(b));
+  });
+  if (valid.length === 0) return null;
+  const priority = valid.find(s => {
+    const l = s.toLowerCase();
+    return l.includes('?r=') || l.includes('cdplay') || l.includes('stream') || l.includes('player') || l.includes('embed');
+  }) || valid[0];
+  return normalizeSourceUrl(priority, currentUrl);
+}
+
 async function resolveStream(startUrl) {
-  let currentUrl = startUrl.startsWith('/') ? 'https://pirlotv.la' + startUrl : startUrl;
+  let currentUrl = normalizeSourceUrl(startUrl, 'https://pirlotv.la/');
   let referer = 'https://pirlotv.la/';
   let lastEmbed = currentUrl;
 
   for (let depth = 0; depth < 5; depth++) {
-    const b64Match = currentUrl.match(/[?&]r=([a-zA-Z0-9+/=]+)/);
-    if (b64Match) {
-      try {
-        currentUrl = Buffer.from(b64Match[1], 'base64').toString('utf-8');
-      } catch (e) {}
-    }
-
-    if (currentUrl.startsWith('//')) currentUrl = 'https:' + currentUrl;
     lastEmbed = currentUrl;
-
     try {
-      const res = await fetch(currentUrl, {
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
-          'Referer': referer
-        }
-      });
+      const res = await safeFetchWithTimeout(currentUrl, { Referer: referer }, 8000);
       if (!res.ok) {
-        console.log(`[Depth ${depth}] HTTP ${res.status} for ${currentUrl}`);
+        console.log(`[Depth ${depth}] HTTP ${res.status} para ${currentUrl}`);
         break;
       }
       const html = await res.text();
 
-      const m3u8Match = html.match(/const streamUrls\s*=\s*(\[[^\]]+\])/i);
-      if (m3u8Match) {
-        const streamUrls = JSON.parse(m3u8Match[1].replace(/\\u0026/g, '&'));
-        return { ok: true, streamUrls, embedUrl: currentUrl, referer, depth };
+      const streams = extractStreamsFromHtml(html);
+      if (streams.length > 0) {
+        return {
+          ok: true,
+          mode: 'hls',
+          streamUrls: streams,
+          embedUrl: currentUrl,
+          referer,
+          depth
+        };
       }
 
-      // Check for Clappr / source
-      const clapprMatch = html.match(/source:\s*["'](https?:\/\/[^"']+\.m3u8[^"']*)["']/i);
-      if (clapprMatch) {
-        return { ok: true, streamUrls: [clapprMatch[1]], embedUrl: currentUrl, referer, depth };
-      }
+      const nextIframe = pickBestIframe(html, currentUrl);
+      if (!nextIframe) break;
 
-      const iframeMatch = html.match(/<iframe[^>]+src=["']([^"']+)["']/i);
-      if (!iframeMatch) {
-        console.log(`[Depth ${depth}] No iframe found in ${currentUrl}, snippet:\n`, html.substring(0, 300));
-        break;
-      }
-
-      console.log(`[Depth ${depth}] ${currentUrl} -> Iframe: ${iframeMatch[1]}`);
+      console.log(`[Depth ${depth}] -> Iframe detectado: ${nextIframe}`);
       referer = currentUrl;
-      currentUrl = iframeMatch[1];
+      currentUrl = nextIframe;
     } catch (e) {
-      console.log(`[Depth ${depth}] Error:`, e.message);
+      console.log(`[Depth ${depth}] Error (${currentUrl}):`, e.message);
       break;
     }
   }
 
-  return { ok: true, streamUrls: [], embedUrl: lastEmbed, referer };
+  return {
+    ok: true,
+    mode: 'embed',
+    streamUrls: [],
+    embedUrl: lastEmbed,
+    referer
+  };
 }
 
 async function run() {
   const options = [
-    { name: 'Canal 1', url: '/capo-deportes.php' },
-    { name: 'Canal 2', url: '/eventos.php?r=aHR0cHM6Ly9jZHBsYXkubGl2ZS9sYWxpZ2ExLnBocA==' },
-    { name: 'Canal 3', url: '/eventoshd.php?r=aHR0cHM6Ly9jZHBsYXkubGl2ZS9sYWxpZ2EyLnBocA==' },
-    { name: 'Canal 4', url: '/eventoshd.php?r=aHR0cHM6Ly9jZHBsYXkubGl2ZS9sYWxpZ2EzLnBocA==' },
-    { name: 'Canal 5', url: '/eventoshd.php?r=aHR0cHM6Ly9jZHBsYXkubGl2ZS9sYWxpZ2E0LnBocA==' },
-    { name: 'Canal 6', url: '/eventoshd.php?r=aHR0cHM6Ly9jZHBsYXkubGl2ZS9sYWxpZ2E5LnBocA==' }
+    { name: 'Canal 1 (Capo)', url: '/capo-deportes.php' },
+    { name: 'Canal 2 (Eventos)', url: '/eventos.php?r=aHR0cHM6Ly9jZHBsYXkubGl2ZS9sYWxpZ2ExLnBocA==' },
+    { name: 'Canal 3 HD', url: '/eventoshd.php?r=aHR0cHM6Ly9jZHBsYXkubGl2ZS9saWdhbXg2LnBocA==' },
+    { name: 'Canal 4 HD (Liga MX 7)', url: '/eventoshd.php?r=aHR0cHM6Ly9jZHBsYXkubGl2ZS9saWdhbXg3LnBocA==' },
+    { name: 'Canal 5 HD', url: '/eventoshd.php?r=aHR0cHM6Ly9jZHBsYXkubGl2ZS9saWdhbXg4LnBocA==' }
   ];
 
+  console.log(`================ MiTV CLI Stream Probe ================`);
   for (const opt of options) {
-    console.log(`\n================ Testing ${opt.name} ================`);
+    console.log(`\n--- Probando ${opt.name} ---`);
     const res = await resolveStream(opt.url);
-    console.log('Result:', JSON.stringify(res, null, 2));
+    console.log('Resultado:', JSON.stringify(res, null, 2));
   }
 }
+
 run();

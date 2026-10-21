@@ -119,6 +119,8 @@ function initSlots() {
       currentMatch: null,
       currentOptionIdx: 0,
       networkRecovered: false,
+      networkRetryCount: 0,
+      abortController: null,
       mode: 'idle' // 'hls' | 'embed' | 'idle'
     });
   }
@@ -161,6 +163,7 @@ function initSlots() {
       slot.errorEl.style.display = 'none';
       slot.emptyEl.style.display = 'none';
       slot.networkRecovered = false;
+      slot.networkRetryCount = 0;
 
       // Enable Web Audio normalizer when focused
       if (slot.index === focusedSlotIdx) {
@@ -386,6 +389,12 @@ function clearSlot(slotIdx) {
   const slot = slots[slotIdx];
   if (!slot) return;
 
+  // Abort any in-flight resolve to prevent race condition
+  if (slot.abortController) {
+    slot.abortController.abort();
+    slot.abortController = null;
+  }
+
   if (slot.hlsInstance) {
     slot.hlsInstance.destroy();
     slot.hlsInstance = null;
@@ -402,6 +411,7 @@ function clearSlot(slotIdx) {
   slot.currentMatch = null;
   slot.currentOptionIdx = 0;
   slot.networkRecovered = false;
+  slot.networkRetryCount = 0;
   slot.mode = 'idle';
 
   slot.titleEl.textContent = `Ranura ${slotIdx + 1}`;
@@ -423,6 +433,14 @@ async function loadStreamInSlot(slotIdx, matchData, optionIndex = 0) {
   const option = matchData.options[optionIndex] || matchData.options[0];
   if (!option) return;
 
+  // Abort any in-flight resolve on this slot to prevent race conditions
+  if (slot.abortController) {
+    slot.abortController.abort();
+    slot.abortController = null;
+  }
+  const controller = new AbortController();
+  slot.abortController = controller;
+
   // Clean prior player in this slot
   if (slot.hlsInstance) {
     slot.hlsInstance.destroy();
@@ -436,6 +454,7 @@ async function loadStreamInSlot(slotIdx, matchData, optionIndex = 0) {
   slot.currentMatch = matchData;
   slot.currentOptionIdx = optionIndex;
   slot.networkRecovered = false;
+  slot.networkRetryCount = 0;
   slot.emptyEl.style.display = 'none';
   slot.errorEl.style.display = 'none';
   slot.loaderText.textContent = `Sintonizando ${option.name}...`;
@@ -446,8 +465,12 @@ async function loadStreamInSlot(slotIdx, matchData, optionIndex = 0) {
   setFocusedSlot(slotIdx);
 
   try {
-    const resolveRes = await fetch(`/api/resolve?url=${encodeURIComponent(option.url)}`);
+    const resolveRes = await fetch(`/api/resolve?url=${encodeURIComponent(option.url)}`, {
+      signal: controller.signal
+    });
     const result = await resolveRes.json();
+
+    if (slot.abortController !== controller) return; // Stale request cancelled
 
     if (!result.ok) {
       throw new Error(result.error || 'No se pudo resolver el stream');
@@ -463,6 +486,7 @@ async function loadStreamInSlot(slotIdx, matchData, optionIndex = 0) {
       throw new Error('Señal no reproducible en esta opción');
     }
   } catch (err) {
+    if (err.name === 'AbortError') return; // Cancelled by user tuning another stream
     console.warn(`Slot ${slotIdx} error:`, err);
     // Automatic fallback to next option if available
     if (matchData.options.length > 1 && optionIndex + 1 < matchData.options.length) {
@@ -474,6 +498,10 @@ async function loadStreamInSlot(slotIdx, matchData, optionIndex = 0) {
     slot.loaderEl.style.display = 'none';
     slot.errorText.textContent = err.message || 'Error al conectar';
     slot.errorEl.style.display = 'flex';
+  } finally {
+    if (slot.abortController === controller) {
+      slot.abortController = null;
+    }
   }
 }
 
@@ -518,20 +546,25 @@ function setupSlotHls(slot, streamUrl, referer) {
       updateQualityIndicator();
     });
 
-    // Intelligent Error Recovery
+    // Intelligent Error Recovery with Exponential Backoff
     hls.on(Hls.Events.ERROR, (event, data) => {
       if (data.fatal) {
         switch (data.type) {
           case Hls.ErrorTypes.NETWORK_ERROR:
-            // Try recovering once before hopping servers
-            if (!slot.networkRecovered) {
-              console.log(`[HLS] Recuperando micro-corte de red en ranura ${slot.index + 1}...`);
-              slot.networkRecovered = true;
-              hls.startLoad();
+            slot.networkRetryCount = (slot.networkRetryCount || 0) + 1;
+            if (slot.networkRetryCount <= 3) {
+              const backoffMs = Math.min(slot.networkRetryCount * 1000, 3000);
+              console.log(`[HLS] Recuperando micro-corte de red en ranura ${slot.index + 1} (intento ${slot.networkRetryCount}/3 en ${backoffMs}ms)...`);
+              setTimeout(() => {
+                if (slot.hlsInstance === hls && slot.mode === 'hls') {
+                  hls.startLoad();
+                }
+              }, backoffMs);
             } else {
-              // Network error persisted: hop to next server option
-              console.warn(`[HLS] Caída persistente de red en ranura ${slot.index + 1}, cambiando de servidor...`);
+              slot.networkRetryCount = 0;
+              console.warn(`[HLS] Caída persistente de red en ranura ${slot.index + 1}, re-sintonizando opción...`);
               hls.destroy();
+              slot.hlsInstance = null;
               if (slot.currentMatch && slot.currentOptionIdx + 1 < slot.currentMatch.options.length) {
                 loadStreamInSlot(slot.index, slot.currentMatch, slot.currentOptionIdx + 1);
               } else {
@@ -543,11 +576,14 @@ function setupSlotHls(slot, streamUrl, referer) {
             break;
 
           case Hls.ErrorTypes.MEDIA_ERROR:
+            console.log(`[HLS] Error de códec/medio en ranura ${slot.index + 1}, ejecutando recoverMediaError()...`);
             hls.recoverMediaError();
             break;
 
           default:
+            console.warn(`[HLS] Error crítico en ranura ${slot.index + 1}:`, data.details);
             hls.destroy();
+            slot.hlsInstance = null;
             if (slot.currentMatch && slot.currentOptionIdx + 1 < slot.currentMatch.options.length) {
               loadStreamInSlot(slot.index, slot.currentMatch, slot.currentOptionIdx + 1);
             } else {

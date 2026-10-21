@@ -338,45 +338,52 @@ function extractFallbackChannels(homeHtml) {
   }));
 }
 
+let inFlightRefresh = null;
 async function refreshCache() {
-  try {
-    let homeHtml = null;
-    let chanHtml = null;
-
+  if (inFlightRefresh) return inFlightRefresh;
+  inFlightRefresh = (async () => {
     try {
-      const homeRes = await safeFetch('https://pirlotv.la/');
-      if (homeRes.ok) homeHtml = await homeRes.text();
-    } catch (e) {
-      console.warn('[Cache] Error fetching home:', e.message);
-    }
+      let homeHtml = null;
+      let chanHtml = null;
 
-    try {
-      const chanRes = await safeFetch('https://pirlotv.la/canales-en-vivo.php');
-      if (chanRes.ok) chanHtml = await chanRes.text();
-    } catch (e) {
-      console.warn('[Cache] Error fetching canales:', e.message);
-    }
+      try {
+        const homeRes = await safeFetch('https://pirlotv.la/');
+        if (homeRes.ok) homeHtml = await homeRes.text();
+      } catch (e) {
+        console.warn('[Cache] Error fetching home:', e.message);
+      }
 
-    if (homeHtml) {
-      cache.matches = parseMatches(homeHtml);
-    }
+      try {
+        const chanRes = await safeFetch('https://pirlotv.la/canales-en-vivo.php');
+        if (chanRes.ok) chanHtml = await chanRes.text();
+      } catch (e) {
+        console.warn('[Cache] Error fetching canales:', e.message);
+      }
 
-    let parsedChannels = [];
-    if (chanHtml) {
-      parsedChannels = parseChannels(chanHtml);
-    }
+      if (homeHtml) {
+        cache.matches = parseMatches(homeHtml);
+      }
 
-    if (parsedChannels.length < 5) {
-      console.log(`[Cache] Canales insuficientes (${parsedChannels.length}), activando catálogo de respaldo...`);
-      parsedChannels = extractFallbackChannels(homeHtml);
-    }
+      let parsedChannels = [];
+      if (chanHtml) {
+        parsedChannels = parseChannels(chanHtml);
+      }
 
-    cache.channels = parsedChannels;
-    cache.lastUpdated = Date.now();
-    console.log(`[Cache Updated] ${cache.matches.length} partidos, ${cache.channels.length} canales.`);
-  } catch (err) {
-    console.error('[Cache Update Error]:', err.message);
-  }
+      if (parsedChannels.length < 5) {
+        console.log(`[Cache] Canales insuficientes (${parsedChannels.length}), activando catálogo de respaldo...`);
+        parsedChannels = extractFallbackChannels(homeHtml);
+      }
+
+      cache.channels = parsedChannels;
+      cache.lastUpdated = Date.now();
+      console.log(`[Cache Updated] ${cache.matches.length} partidos, ${cache.channels.length} canales.`);
+    } catch (err) {
+      console.error('[Cache Update Error]:', err.message);
+    } finally {
+      inFlightRefresh = null;
+    }
+  })();
+  return inFlightRefresh;
 }
 
 // --------------------------------------------------------------------------
@@ -663,9 +670,36 @@ async function resolveStream(startUrl) {
   };
 }
 
+// In-flight Coalescing Map (Deduplication of concurrent requests for same stream)
+const inFlightResolves = new Map();
+
+function resolveStreamWithCoalescing(normalizedUrl) {
+  if (inFlightResolves.has(normalizedUrl)) {
+    return inFlightResolves.get(normalizedUrl);
+  }
+
+  const promise = resolveStream(normalizedUrl).finally(() => {
+    inFlightResolves.delete(normalizedUrl);
+  });
+
+  inFlightResolves.set(normalizedUrl, promise);
+  return promise;
+}
+
 // --------------------------------------------------------------------------
 // 4. API Endpoints
 // --------------------------------------------------------------------------
+
+// Lightweight Healthcheck for Docker / Render / Kubernetes monitoring
+app.get('/health', (req, res) => {
+  res.status(200).json({
+    status: 'ok',
+    uptime: Math.floor(process.uptime()),
+    timestamp: Date.now(),
+    matches: cache.matches.length,
+    channels: cache.channels.length
+  });
+});
 
 // Schedule
 app.get('/api/schedule', async (req, res) => {
@@ -702,7 +736,7 @@ app.get('/api/refresh', async (req, res) => {
   });
 });
 
-// Stream resolver
+// Stream resolver with In-Flight Coalescing (Prevents duplicate parallel scrapers)
 app.get('/api/resolve', async (req, res) => {
   const url = req.query.url;
   if (!url) {
@@ -720,7 +754,7 @@ app.get('/api/resolve', async (req, res) => {
   }
 
   try {
-    const result = await resolveStream(normalized);
+    const result = await resolveStreamWithCoalescing(normalized);
     res.json(result);
   } catch (err) {
     res.status(500).json({ ok: false, error: err.message });
@@ -738,7 +772,8 @@ app.post('/api/probe-fastest', async (req, res) => {
 
   const probePromises = options.map(async (opt, index) => {
     try {
-      const resolved = await resolveStream(opt.url);
+      const normUrl = normalizeSourceUrl(opt.url, 'https://pirlotv.la/');
+      const resolved = await resolveStreamWithCoalescing(normUrl || opt.url);
       if (!resolved || !resolved.ok) {
         return {
           ...opt,
@@ -892,7 +927,7 @@ app.get('/api/network-info', (req, res) => {
 });
 
 // --------------------------------------------------------------------------
-// 7. M3U8 Playlist Proxy (Correct URL Resolution with new URL(trimmed, targetUrl))
+// 7. M3U8 Playlist Proxy (Correct URL Resolution with new URL(trimmed, effectiveUrl))
 // --------------------------------------------------------------------------
 app.get('/api/stream/m3u8', async (req, res) => {
   const targetUrl = req.query.url;
@@ -907,17 +942,25 @@ app.get('/api/stream/m3u8', async (req, res) => {
     return res.status(403).send(`Acceso denegado: ${safety.reason}`);
   }
 
+  const controller = new AbortController();
+  const onClose = () => controller.abort();
+  req.on('close', onClose);
+
   try {
     let originHeader = 'https://xstream.st';
     try {
       originHeader = new URL(referer).origin;
     } catch (e) {}
 
-    const response = await safeFetch(targetUrl, {
+    const response = await fetch(targetUrl, {
       headers: {
+        'User-Agent': USER_AGENT,
         'Referer': referer,
-        'Origin': originHeader
-      }
+        'Origin': originHeader,
+        'Connection': 'keep-alive'
+      },
+      redirect: 'follow',
+      signal: controller.signal
     });
 
     if (!response.ok) {
@@ -925,8 +968,9 @@ app.get('/api/stream/m3u8', async (req, res) => {
     }
 
     const playlist = await response.text();
+    // Use effectiveUrl (final URL after any redirects) to resolve relative paths safely
+    const effectiveUrl = response.url || targetUrl;
 
-    // Rewrite playlist lines safely with new URL(line, targetUrl).href
     const lines = playlist.split('\n');
     const rewritten = lines.map(line => {
       const trimmed = line.trim();
@@ -937,7 +981,7 @@ app.get('/api/stream/m3u8', async (req, res) => {
         return line.replace(/URI=["']([^"']+)["']/g, (m, uri) => {
           let absUri = uri;
           try {
-            absUri = new URL(uri, targetUrl).href;
+            absUri = new URL(uri, effectiveUrl).href;
           } catch (e) {}
           return `URI="/api/stream/ts?url=${encodeURIComponent(absUri)}&referer=${encodeURIComponent(referer)}"`;
         });
@@ -946,7 +990,7 @@ app.get('/api/stream/m3u8', async (req, res) => {
       // Media chunk or sub-playlist URL
       let absoluteTarget = trimmed;
       try {
-        absoluteTarget = new URL(trimmed, targetUrl).href;
+        absoluteTarget = new URL(trimmed, effectiveUrl).href;
       } catch (e) {}
 
       const isSubPlaylist = absoluteTarget.includes('.m3u8');
@@ -961,8 +1005,13 @@ app.get('/api/stream/m3u8', async (req, res) => {
     res.setHeader('Keep-Alive', 'timeout=30, max=1000');
     res.send(rewritten);
   } catch (err) {
+    if (err.name === 'AbortError') return;
     console.error('M3U8 proxy error:', err.message);
-    res.status(502).send('Error proxying m3u8: ' + err.message);
+    if (!res.headersSent) {
+      res.status(502).send('Error proxying m3u8: ' + err.message);
+    }
+  } finally {
+    req.off('close', onClose);
   }
 });
 
@@ -983,9 +1032,8 @@ app.get('/api/stream/ts', async (req, res) => {
   }
 
   const controller = new AbortController();
-  req.on('close', () => {
-    controller.abort();
-  });
+  const onClose = () => controller.abort();
+  req.on('close', onClose);
 
   try {
     let originHeader = 'https://xstream.st';
@@ -1006,6 +1054,7 @@ app.get('/api/stream/ts', async (req, res) => {
 
     const response = await fetch(targetUrl, {
       headers: upstreamHeaders,
+      redirect: 'follow',
       signal: controller.signal
     });
 
@@ -1014,10 +1063,10 @@ app.get('/api/stream/ts', async (req, res) => {
     }
 
     let contentType = 'video/mp2t';
-    const lowerUrl = targetUrl.toLowerCase();
-    if (lowerUrl.includes('.m4s') || lowerUrl.includes('.mp4')) {
+    const effectiveTarget = (response.url || targetUrl).toLowerCase();
+    if (effectiveTarget.includes('.m4s') || effectiveTarget.includes('.mp4')) {
       contentType = 'video/mp4';
-    } else if (lowerUrl.includes('.aac')) {
+    } else if (effectiveTarget.includes('.aac')) {
       contentType = 'audio/aac';
     }
 
@@ -1053,6 +1102,8 @@ app.get('/api/stream/ts', async (req, res) => {
     if (!res.headersSent) {
       res.status(502).send('Error streaming video segment: ' + err.message);
     }
+  } finally {
+    req.off('close', onClose);
   }
 });
 
@@ -1082,12 +1133,17 @@ app.get('/player/clean-embed', async (req, res) => {
     originHeader = new URL(embedUrl).origin;
   } catch (e) {}
 
+  const controller = new AbortController();
+  const onClose = () => controller.abort();
+  req.on('close', onClose);
+
   try {
     const response = await safeFetch(embedUrl, {
       headers: {
         'Referer': referer,
         'Origin': originHeader
-      }
+      },
+      signal: controller.signal
     });
 
     if (!response.ok) {
@@ -1220,8 +1276,13 @@ app.get('/player/clean-embed', async (req, res) => {
     res.setHeader('Content-Security-Policy', "frame-ancestors 'self' *;");
     res.send(html);
   } catch (err) {
+    if (err.name === 'AbortError') return;
     console.error('Clean embed error:', err.message);
-    res.status(502).send('Error proxying embed: ' + err.message);
+    if (!res.headersSent) {
+      res.status(502).send('Error proxying embed: ' + err.message);
+    }
+  } finally {
+    req.off('close', onClose);
   }
 });
 

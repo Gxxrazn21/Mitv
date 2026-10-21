@@ -269,6 +269,8 @@ html, body {
 #videoGrid.filter-sharp video,
 #videoGrid.filter-sharp iframe {
   filter: url(#sports-hd-enhance) contrast(1.06) saturate(1.1) !important;
+  will-change: filter, transform;
+  transform: translateZ(0);
 }
 
 #videoGrid.enhance-vivid video,
@@ -278,6 +280,18 @@ html, body {
 #videoGrid.filter-vivid video,
 #videoGrid.filter-vivid iframe {
   filter: url(#sports-hd-enhance) contrast(1.12) saturate(1.25) brightness(1.03) !important;
+  will-change: filter, transform;
+  transform: translateZ(0);
+}
+
+/* Ensure native fullscreen, picture-in-picture and controls remain unobstructed */
+video::-webkit-media-controls {
+  z-index: 2147483647;
+  position: relative;
+}
+:fullscreen video {
+  max-width: 100vw !important;
+  max-height: 100vh !important;
 }
 
 /* Stream Slot Box */

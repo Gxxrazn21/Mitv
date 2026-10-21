@@ -1,11 +1,11 @@
 {
-  "name": "Pirlo Shield - Deportes en Vivo",
-  "short_name": "PirloShield",
-  "description": "Reproductor deportivo en vivo de alto rendimiento, sin publicidad, con multi-pantalla y traspaso móvil.",
+  "name": "MiTV | Studio Deportivo Multi-Stream",
+  "short_name": "MiTV",
+  "description": "Reproductor deportivo en vivo de alto rendimiento estilo Apple TV / YouTube TV Dark, sin publicidad, con multi-stream de 1 a 4 pantallas.",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#080b11",
-  "theme_color": "#080b11",
+  "background_color": "#070709",
+  "theme_color": "#070709",
   "orientation": "any",
   "icons": [
     {
