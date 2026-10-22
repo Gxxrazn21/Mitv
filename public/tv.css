@@ -1,0 +1,59 @@
+/* Bright, inset focus stays visible inside clipped video and scrolling lists. */
+:root { --focus-ring: #f4f4ff; }
+button:focus, input:focus, [tabindex="0"]:focus {
+  outline: 3px solid var(--focus-ring);
+  outline-offset: -3px;
+}
+.event-card:focus { background: #343044; }
+.stream-slot:focus { outline-width: 4px; }
+.slot-floating-bar { visibility: hidden; }
+.stream-slot:hover .slot-floating-bar, .stream-slot:focus-within .slot-floating-bar { visibility: visible; opacity: 1; pointer-events: auto; }
+.stream-slot:focus-within { z-index: 2; }
+.slot-floating-bar { z-index: 10; }
+.sidebar.collapsed { visibility: hidden; }
+.stage, .video-grid, .stream-slot, .sidebar-list { min-height: 0; min-width: 0; }
+.slot-media-box, .slot-video { transform: translateZ(0); }
+.modal-box { max-height: 90vh; overflow-y: auto; }
+body { display: flex; flex-direction: column; padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); }
+body .app-stage { flex: 1; height: auto; min-height: 0; width: 100%; }
+.topbar { flex-shrink: 0; }
+.topbar-center { min-width: 0; overflow-x: auto; }
+.topbar-center > * { flex-shrink: 0; }
+
+/* AFT detection or ?tv=1: keep all interactive UI within the outer 5%. */
+.tv-mode body { padding: 5vh 5vw; font-size: clamp(14px, 1.15vw, 24px); }
+.tv-mode .topbar { height: auto; min-height: 52px; max-height: none; flex-wrap: wrap; padding: 6px; gap: 6px; }
+.tv-mode .topbar-left { min-width: 0; }
+.tv-mode .topbar-center { flex: 1 1 auto; }
+.tv-mode .active-match-title { max-width: 14vw; }
+.tv-mode .app-stage { flex-direction: row; }
+.tv-mode .stage { flex: 1; height: 100%; }
+.tv-mode .video-grid { flex: 1; aspect-ratio: auto; max-height: none; }
+.tv-mode .sidebar { width: 28vw !important; min-width: 240px !important; flex: 0 0 28vw !important; height: 100% !important; }
+.tv-mode .sidebar.collapsed { display: none !important; }
+.tv-mode button, .tv-mode input { min-height: 40px; font-size: inherit; }
+.tv-mode button { min-width: 40px; }
+.tv-mode .event-card { min-height: 64px; }
+.tv-mode .event-name { font-size: 1em; }
+.tv-mode .slot-floating-bar { height: 46px; background: #18181e; }
+.tv-mode .slot-title { min-width: 0; }
+.tv-mode .stage-footer { height: auto; min-height: 48px; max-height: none; flex-shrink: 0; }
+.tv-mode .slot-actions { flex-shrink: 0; }
+.tv-mode .sidebar-list { scroll-behavior: auto; }
+.tv-mode .modal-layer { padding: 5vh 5vw; }
+
+/* Avoid expensive convolution/compositing on low-memory Android renderers. */
+.low-resource *, .low-resource *::before, .low-resource *::after { transition: none !important; box-shadow: none !important; backdrop-filter: none !important; }
+.low-resource .brand-dot, .low-resource .red-dot { animation: none; }
+.low-resource #videoGrid video, .low-resource #videoGrid iframe { filter: none !important; will-change: auto; }
+.low-resource .event-card:hover, .low-resource button:hover { transform: none; }
+@media (pointer: coarse) {
+  button, .slot-mini-btn, .add-multistream-btn { min-width: 44px; min-height: 44px; }
+  .slot-floating-bar { height: 48px; }
+  .stage-footer { min-height: 48px; max-height: none; }
+  .topbar { min-height: 48px; max-height: none; }
+  .topbar-center { align-self: stretch; }
+}
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { transition: none !important; animation: none !important; scroll-behavior: auto !important; }
+}

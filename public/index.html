@@ -2,7 +2,7 @@
 <html lang="es">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <title>MiTV | Studio Deportivo Multi-Stream</title>
   <meta name="description" content="Plataforma de transmisión deportiva en vivo de alto rendimiento estilo Apple TV / YouTube TV Dark. Multi-stream de 1 a 4 pantallas con foco de audio exclusivo y realce por GPU.">
 
@@ -23,7 +23,9 @@
   <!-- HLS.js for direct video streaming -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/hls.js/1.5.7/hls.min.js"></script>
 
-  <link rel="stylesheet" href="app.css?v=6.0">
+  <link rel="stylesheet" href="app.css?v=8.0">
+  <link rel="stylesheet" href="tv.css?v=8.0">
+  <script src="tv.js?v=8.0"></script>
 </head>
 <body>
   <!-- GPU Adaptive Sharpening SVG Filter -->
@@ -118,7 +120,7 @@
             </div>
           </div>
           <div class="slot-media-box">
-            <video class="slot-video" playsinline preload="auto"></video>
+            <video class="slot-video" playsinline webkit-playsinline preload="metadata"></video>
             <iframe class="slot-iframe" name="slot-0" sandbox="allow-scripts allow-same-origin allow-forms allow-presentation" allow="autoplay; fullscreen; encrypted-media; picture-in-picture" allowfullscreen="true"></iframe>
             <div class="slot-overlay slot-loader" style="display:none;">
               <div class="loader-spinner"></div>
@@ -151,7 +153,7 @@
             </div>
           </div>
           <div class="slot-media-box">
-            <video class="slot-video" playsinline preload="auto"></video>
+            <video class="slot-video" playsinline webkit-playsinline preload="metadata"></video>
             <iframe class="slot-iframe" name="slot-1" sandbox="allow-scripts allow-same-origin allow-forms allow-presentation" allow="autoplay; fullscreen; encrypted-media; picture-in-picture" allowfullscreen="true"></iframe>
             <div class="slot-overlay slot-loader" style="display:none;">
               <div class="loader-spinner"></div>
@@ -184,7 +186,7 @@
             </div>
           </div>
           <div class="slot-media-box">
-            <video class="slot-video" playsinline preload="auto"></video>
+            <video class="slot-video" playsinline webkit-playsinline preload="metadata"></video>
             <iframe class="slot-iframe" name="slot-2" sandbox="allow-scripts allow-same-origin allow-forms allow-presentation" allow="autoplay; fullscreen; encrypted-media; picture-in-picture" allowfullscreen="true"></iframe>
             <div class="slot-overlay slot-loader" style="display:none;">
               <div class="loader-spinner"></div>
@@ -217,7 +219,7 @@
             </div>
           </div>
           <div class="slot-media-box">
-            <video class="slot-video" playsinline preload="auto"></video>
+            <video class="slot-video" playsinline webkit-playsinline preload="metadata"></video>
             <iframe class="slot-iframe" name="slot-3" sandbox="allow-scripts allow-same-origin allow-forms allow-presentation" allow="autoplay; fullscreen; encrypted-media; picture-in-picture" allowfullscreen="true"></iframe>
             <div class="slot-overlay slot-loader" style="display:none;">
               <div class="loader-spinner"></div>
@@ -315,7 +317,7 @@
   </main>
 
   <!-- Mobile LAN Modal -->
-  <div class="modal-layer" id="phoneModal" style="display:none;">
+  <div class="modal-layer" role="dialog" aria-modal="true" aria-label="Ver en móvil" id="phoneModal" style="display:none;">
     <div class="modal-box">
       <div class="modal-top">
         <div class="modal-headline">
@@ -335,6 +337,6 @@
     </div>
   </div>
 
-  <script src="app.js?v=6.0"></script>
+  <script src="app.js?v=8.0"></script>
 </body>
 </html>
