@@ -1,4 +1,7 @@
-FROM node:20-alpine
+FROM node:22-alpine
+
+# Update system packages and root certificates to mitigate TLS vulnerabilities
+RUN apk update && apk upgrade && apk add --no-cache ca-certificates && update-ca-certificates
 
 # Set default environment variables for production and Hugging Face Spaces
 ENV NODE_ENV=production \

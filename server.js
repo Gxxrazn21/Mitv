@@ -30,6 +30,11 @@ app.use((req, res, next) => {
   res.setHeader('X-XSS-Protection', '1; mode=block');
   res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
   res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+  res.setHeader('X-DNS-Prefetch-Control', 'off');
+  res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=(), payment=(), usb=()');
+  if (req.secure || req.headers['x-forwarded-proto'] === 'https') {
+    res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+  }
   next();
 });
 
@@ -59,6 +64,7 @@ function isPrivateIp(ip) {
     if (parts[0] === 169 && parts[1] === 254) return true;
     if (parts[0] === 172 && parts[1] >= 16 && parts[1] <= 31) return true;
     if (parts[0] === 192 && parts[1] === 168) return true;
+    if (parts[0] === 100 && parts[1] >= 64 && parts[1] <= 127) return true;
     if (ip === '255.255.255.255') return true;
     return false;
   }
@@ -97,21 +103,28 @@ function isSafeExternalUrl(rawUrl) {
     return { safe: false, reason: `Protocolo no permitido: ${parsed.protocol}` };
   }
 
-  const hostname = parsed.hostname.toLowerCase();
-  // Permissive filtering: block only internal loopback and cloud metadata vectors
-  if (
-    hostname === 'localhost' ||
-    hostname.endsWith('.localhost') ||
-    hostname === '127.0.0.1' ||
-    hostname === '0.0.0.0' ||
-    hostname === '169.254.169.254' ||
-    hostname === 'metadata.google.internal'
-  ) {
-    return { safe: false, reason: 'Acceso a host local o metadata prohibido (Anti-SSRF)' };
-  }
+  const rawHostname = parsed.hostname.toLowerCase();
+  const cleanHost = rawHostname.replace(/^\[|\]$/g, '');
 
-  if (isPrivateIp(hostname)) {
-    return { safe: false, reason: 'Acceso a direcciones IP privadas prohibido (Anti-SSRF)' };
+  if (
+    rawHostname === 'localhost' ||
+    rawHostname.endsWith('.localhost') ||
+    rawHostname.endsWith('.local') ||
+    rawHostname.endsWith('.internal') ||
+    rawHostname.endsWith('.lan') ||
+    rawHostname.endsWith('.home') ||
+    rawHostname.endsWith('.corp') ||
+    rawHostname === 'metadata.google.internal' ||
+    cleanHost === '127.0.0.1' ||
+    cleanHost === '0.0.0.0' ||
+    cleanHost === '169.254.169.254' ||
+    cleanHost === '::1' ||
+    cleanHost === '::' ||
+    cleanHost === '0:0:0:0:0:0:0:1' ||
+    cleanHost === '0:0:0:0:0:0:0:0' ||
+    isPrivateIp(cleanHost)
+  ) {
+    return { safe: false, reason: 'Acceso a host local, red privada o metadata prohibido (Anti-SSRF)' };
   }
 
   return { safe: true, url: parsed.href };
@@ -447,6 +460,10 @@ function getLegitimateHeaders(targetUrl, incomingReferer = null, customHeaders =
 }
 
 async function safeFetch(url, options = {}, timeoutMs = 12000) {
+  const safety = isSafeExternalUrl(url);
+  if (!safety.safe) {
+    throw new Error(`SSRF bloqueado: ${safety.reason}`);
+  }
   const controller = new AbortController();
   const id = setTimeout(() => controller.abort(), timeoutMs);
   try {
@@ -1251,7 +1268,29 @@ app.post('/api/probe-fastest', async (req, res) => {
   const probePromises = options.map(async (opt, index) => {
     try {
       const normUrl = normalizeSourceUrl(opt.url, 'https://pirlotv.la/');
-      const resolved = await resolveStreamWithCoalescing(normUrl || opt.url);
+      if (!normUrl) {
+        return {
+          ...opt,
+          index,
+          available: false,
+          latencyMs: 9999,
+          mode: 'unavailable',
+          error: 'URL no válida'
+        };
+      }
+      const safety = isSafeExternalUrl(normUrl);
+      if (!safety.safe) {
+        return {
+          ...opt,
+          index,
+          available: false,
+          latencyMs: 9999,
+          mode: 'unavailable',
+          error: safety.reason
+        };
+      }
+
+      const resolved = await resolveStreamWithCoalescing(normUrl);
       if (!resolved || !resolved.ok) {
         return {
           ...opt,
@@ -1265,6 +1304,18 @@ app.post('/api/probe-fastest', async (req, res) => {
 
       if (resolved.mode === 'hls' && resolved.streamUrls && resolved.streamUrls.length > 0) {
         const testTarget = resolved.streamUrls[0];
+        const targetSafety = isSafeExternalUrl(testTarget);
+        if (!targetSafety.safe) {
+          return {
+            ...opt,
+            index,
+            available: false,
+            latencyMs: 9999,
+            mode: 'unavailable',
+            error: targetSafety.reason
+          };
+        }
+
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 12000);
         const probeStart = performance.now();

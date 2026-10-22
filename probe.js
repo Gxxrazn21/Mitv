@@ -1,3 +1,5 @@
+import net from 'net';
+
 /**
  * MiTV - Advanced CLI Stream Probe & Diagnostics Tool
  * Tests stream deobfuscation, multi-hop iframe traversal, and HLS manifest availability.
@@ -13,6 +15,81 @@ export const CONTAINER_BROWSER_ARGS = [
   '--disable-gpu',
   '--no-first-run'
 ];
+
+function isPrivateIp(ip) {
+  if (net.isIPv4(ip)) {
+    const parts = ip.split('.').map(Number);
+    if (parts[0] === 0) return true;
+    if (parts[0] === 10) return true;
+    if (parts[0] === 127) return true;
+    if (parts[0] === 169 && parts[1] === 254) return true;
+    if (parts[0] === 172 && parts[1] >= 16 && parts[1] <= 31) return true;
+    if (parts[0] === 192 && parts[1] === 168) return true;
+    if (parts[0] === 100 && parts[1] >= 64 && parts[1] <= 127) return true;
+    if (ip === '255.255.255.255') return true;
+    return false;
+  }
+  if (net.isIPv6(ip)) {
+    const normalized = ip.toLowerCase();
+    if (normalized === '::1' || normalized === '0:0:0:0:0:0:0:1') return true;
+    if (normalized === '::' || normalized === '0:0:0:0:0:0:0:0') return true;
+    if (normalized.startsWith('fc') || normalized.startsWith('fd')) return true;
+    if (normalized.startsWith('fe80:')) return true;
+    return false;
+  }
+  return false;
+}
+
+function isSafeExternalUrl(rawUrl) {
+  if (!rawUrl || typeof rawUrl !== 'string') {
+    return { safe: false, reason: 'URL nula o no válida' };
+  }
+  let trimmed = rawUrl.trim();
+  if (trimmed.startsWith('//')) {
+    trimmed = 'https:' + trimmed;
+  }
+
+  let parsed;
+  try {
+    parsed = new URL(trimmed);
+  } catch (e) {
+    try {
+      parsed = new URL(trimmed, 'https://pirlotv.la/');
+    } catch (e2) {
+      return { safe: false, reason: 'Formato de URL no válido' };
+    }
+  }
+
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+    return { safe: false, reason: `Protocolo no permitido: ${parsed.protocol}` };
+  }
+
+  const rawHostname = parsed.hostname.toLowerCase();
+  const cleanHost = rawHostname.replace(/^\[|\]$/g, '');
+
+  if (
+    rawHostname === 'localhost' ||
+    rawHostname.endsWith('.localhost') ||
+    rawHostname.endsWith('.local') ||
+    rawHostname.endsWith('.internal') ||
+    rawHostname.endsWith('.lan') ||
+    rawHostname.endsWith('.home') ||
+    rawHostname.endsWith('.corp') ||
+    rawHostname === 'metadata.google.internal' ||
+    cleanHost === '127.0.0.1' ||
+    cleanHost === '0.0.0.0' ||
+    cleanHost === '169.254.169.254' ||
+    cleanHost === '::1' ||
+    cleanHost === '::' ||
+    cleanHost === '0:0:0:0:0:0:0:1' ||
+    cleanHost === '0:0:0:0:0:0:0:0' ||
+    isPrivateIp(cleanHost)
+  ) {
+    return { safe: false, reason: 'Acceso a host local, red privada o metadata prohibido (Anti-SSRF)' };
+  }
+
+  return { safe: true, url: parsed.href };
+}
 
 function normalizeSourceUrl(rawUrl, base = 'https://pirlotv.la/') {
   if (!rawUrl || typeof rawUrl !== 'string') return null;
@@ -43,6 +120,11 @@ function normalizeSourceUrl(rawUrl, base = 'https://pirlotv.la/') {
 }
 
 async function safeFetchWithTimeout(url, headers = {}, timeoutMs = 12000) {
+  const safety = isSafeExternalUrl(url);
+  if (!safety.safe) {
+    throw new Error(`SSRF bloqueado: ${safety.reason}`);
+  }
+
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
   try {
@@ -133,11 +215,25 @@ function pickBestIframe(html, currentUrl) {
 
 async function resolveStream(startUrl) {
   let currentUrl = normalizeSourceUrl(startUrl, 'https://pirlotv.la/');
+  if (!currentUrl) {
+    return { ok: false, error: 'URL no válida' };
+  }
+  const initSafety = isSafeExternalUrl(currentUrl);
+  if (!initSafety.safe) {
+    return { ok: false, error: initSafety.reason };
+  }
+
   let referer = 'https://pirlotv.la/';
   let lastEmbed = currentUrl;
 
   for (let depth = 0; depth < 5; depth++) {
     lastEmbed = currentUrl;
+    const depthSafety = isSafeExternalUrl(currentUrl);
+    if (!depthSafety.safe) {
+      console.log(`[Depth ${depth}] Bloqueado por Anti-SSRF: ${depthSafety.reason}`);
+      break;
+    }
+
     try {
       const res = await safeFetchWithTimeout(currentUrl, { Referer: referer }, 12000);
       if (!res.ok) {
