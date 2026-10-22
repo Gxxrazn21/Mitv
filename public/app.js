@@ -78,6 +78,8 @@ document.addEventListener('DOMContentLoaded', async () => {
   setupUIEventListeners();
   setupKeyboardShortcuts();
   applyEnhanceMode();
+  setupVolumeControls();
+  registerServiceWorkerSafely();
 
   await Promise.all([
     fetchSchedule(),
@@ -257,12 +259,12 @@ function setFocusedSlot(targetIdx) {
     // Instant visual indication: Purple outline & glow
     slot.slotEl.classList.toggle('active-audio', isFocused);
 
-    // Audio Muting Logic: ONLY focused slot produces sound
+    // Audio Muting Logic: ONLY focused slot produces sound, respecting master volume slider
     if (slot.mode === 'hls' && slot.videoEl) {
       if (isFocused) {
-        // Activate audio on target screen
-        slot.videoEl.muted = false;
-        slot.videoEl.volume = 1;
+        // Activate audio on target screen respecting volume controls
+        slot.videoEl.muted = isVolumeMuted;
+        slot.videoEl.volume = isVolumeMuted ? 0 : currentVolume;
         // Never pause; ensure active playback continues
         if (!slot.isUserPaused && slot.videoEl.paused) {
           slot.videoEl.play().catch(() => {});
@@ -277,13 +279,23 @@ function setFocusedSlot(targetIdx) {
       }
     } else if (slot.mode === 'embed' && slot.iframeEl && slot.iframeEl.contentWindow) {
       try {
+        const shouldMute = !isFocused || isVolumeMuted;
         slot.iframeEl.contentWindow.postMessage({
           type: 'SET_MUTE',
-          muted: !isFocused
+          muted: shouldMute
         }, '*');
+        if (isFocused) {
+          slot.iframeEl.contentWindow.postMessage({
+            type: 'SET_VOLUME',
+            volume: shouldMute ? 0 : currentVolume
+          }, '*');
+        }
       } catch (e) {}
     }
   });
+
+  // Sync Volume UI with focused slot
+  syncVolumeUI();
 
   // Update Footer UI
   const pill = document.getElementById('focusedSlotPill');
@@ -652,7 +664,9 @@ function setupSlotHls(slot, streamUrl, referer) {
       if (hls.levels && hls.levels.length > 0) {
         hls.currentLevel = hls.levels.length - 1;
       }
-      slot.videoEl.muted = (slot.index !== focusedSlotIdx);
+      const isFocused = (slot.index === focusedSlotIdx);
+      slot.videoEl.muted = !isFocused || isVolumeMuted;
+      slot.videoEl.volume = (!isFocused || isVolumeMuted) ? 0 : currentVolume;
       slot.videoEl.play().catch(() => {});
       updateQualityIndicator();
     });
@@ -712,7 +726,9 @@ function setupSlotHls(slot, streamUrl, referer) {
     });
   } else if (slot.videoEl.canPlayType('application/vnd.apple.mpegurl')) {
     slot.videoEl.src = proxiedM3u8;
-    slot.videoEl.muted = (slot.index !== focusedSlotIdx);
+    const isFocused = (slot.index === focusedSlotIdx);
+    slot.videoEl.muted = !isFocused || isVolumeMuted;
+    slot.videoEl.volume = (!isFocused || isVolumeMuted) ? 0 : currentVolume;
     slot.videoEl.play().catch(() => {});
   } else {
     slot.loaderEl.style.display = 'none';
@@ -735,10 +751,18 @@ function setupSlotEmbed(slot, embedUrl) {
     slot.emptyEl.style.display = 'none';
     updateQualityIndicator();
     try {
+      const isFocused = (slot.index === focusedSlotIdx);
+      const shouldMute = !isFocused || isVolumeMuted;
       slot.iframeEl.contentWindow.postMessage({
         type: 'SET_MUTE',
-        muted: (slot.index !== focusedSlotIdx)
+        muted: shouldMute
       }, '*');
+      if (isFocused) {
+        slot.iframeEl.contentWindow.postMessage({
+          type: 'SET_VOLUME',
+          volume: shouldMute ? 0 : currentVolume
+        }, '*');
+      }
 
       const currentFit = FIT_MODES[currentFitIdx].key;
       slot.iframeEl.contentWindow.postMessage({
@@ -1152,6 +1176,11 @@ function setupKeyboardShortcuts() {
         document.exitFullscreen().catch(() => {});
       }
     }
+
+    // Key 'm' or 'M' toggles Mute
+    if (e.key === 'm' || e.key === 'M') {
+      toggleMasterMute();
+    }
   });
 }
 
@@ -1171,5 +1200,125 @@ async function fetchNetworkInfo() {
     }
   } catch (err) {
     console.error('Error fetching network info:', err);
+  }
+}
+
+// --------------------------------------------------------------------------
+// Master Volume & Independent Mute Controller
+// --------------------------------------------------------------------------
+let currentVolume = 1.0;
+let isVolumeMuted = false;
+let preMuteVolume = 1.0;
+
+function syncVolumeUI() {
+  const slider = document.getElementById('volumeSlider');
+  const percentLabel = document.getElementById('volumePercent');
+  const muteBtn = document.getElementById('volumeMuteBtn');
+  const muteIcon = document.getElementById('volumeMuteIcon');
+
+  const effectiveVal = isVolumeMuted ? 0 : currentVolume;
+
+  if (slider) slider.value = effectiveVal;
+  if (percentLabel) percentLabel.textContent = `${Math.round(effectiveVal * 100)}%`;
+
+  if (muteBtn && muteIcon) {
+    if (isVolumeMuted || currentVolume === 0) {
+      muteIcon.textContent = '🔇';
+      muteBtn.classList.add('muted');
+      muteBtn.setAttribute('title', 'Activar sonido (M)');
+    } else {
+      muteIcon.textContent = currentVolume < 0.5 ? '🔉' : '🔊';
+      muteBtn.classList.remove('muted');
+      muteBtn.setAttribute('title', 'Silenciar (M)');
+    }
+  }
+}
+
+function setMasterVolume(val, muted = false) {
+  const clamped = Math.max(0, Math.min(1, val));
+  currentVolume = clamped;
+  isVolumeMuted = muted || clamped === 0;
+
+  syncVolumeUI();
+
+  // Apply directly to focused slot
+  const focusedSlot = slots[focusedSlotIdx];
+  if (focusedSlot) {
+    if (focusedSlot.mode === 'hls' && focusedSlot.videoEl) {
+      focusedSlot.videoEl.muted = isVolumeMuted;
+      focusedSlot.videoEl.volume = isVolumeMuted ? 0 : clamped;
+    } else if (focusedSlot.mode === 'embed' && focusedSlot.iframeEl && focusedSlot.iframeEl.contentWindow) {
+      try {
+        focusedSlot.iframeEl.contentWindow.postMessage({
+          type: 'SET_MUTE',
+          muted: isVolumeMuted
+        }, '*');
+        focusedSlot.iframeEl.contentWindow.postMessage({
+          type: 'SET_VOLUME',
+          volume: isVolumeMuted ? 0 : clamped
+        }, '*');
+      } catch (e) {}
+    }
+  }
+}
+
+function toggleMasterMute() {
+  if (isVolumeMuted || currentVolume === 0) {
+    // Unmute
+    const restore = preMuteVolume > 0 ? preMuteVolume : 1.0;
+    setMasterVolume(restore, false);
+  } else {
+    // Mute
+    preMuteVolume = currentVolume > 0 ? currentVolume : 1.0;
+    setMasterVolume(0, true);
+  }
+}
+
+function setupVolumeControls() {
+  const muteBtn = document.getElementById('volumeMuteBtn');
+  const slider = document.getElementById('volumeSlider');
+
+  if (muteBtn) {
+    muteBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      toggleMasterMute();
+    });
+  }
+
+  if (slider) {
+    slider.addEventListener('input', (e) => {
+      e.stopPropagation();
+      const val = parseFloat(e.target.value);
+      if (val === 0) {
+        setMasterVolume(0, true);
+      } else {
+        preMuteVolume = val;
+        setMasterVolume(val, false);
+      }
+    });
+  }
+
+  syncVolumeUI();
+}
+
+// --------------------------------------------------------------------------
+// Safe Service Worker Registration for IP / HTTP / PWA Environments
+// --------------------------------------------------------------------------
+function registerServiceWorkerSafely() {
+  // Only register Service Worker in secure contexts (HTTPS or localhost / 127.0.0.1)
+  const isSecure = window.isSecureContext || window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+
+  if ('serviceWorker' in navigator && isSecure) {
+    window.addEventListener('load', () => {
+      navigator.serviceWorker.register('/sw.js')
+        .then((reg) => {
+          console.log('[PWA] Service Worker registrado exitosamente con alcance:', reg.scope);
+        })
+        .catch((err) => {
+          console.warn('[PWA] Advertencia al registrar Service Worker:', err.message);
+        });
+    });
+  } else {
+    console.log('[PWA] Contexto HTTP o IP no seguro detectado. Service Worker desactivado para prevenir bloqueos o errores de consola.');
   }
 }

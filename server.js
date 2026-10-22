@@ -1436,7 +1436,6 @@ app.get('/player/clean-embed', async (req, res) => {
               document.querySelectorAll('video, audio').forEach(function(media) {
                 media.muted = shouldMute;
                 if (!shouldMute) {
-                  media.volume = 1;
                   media.play().catch(function(){});
                 }
               });
@@ -1445,8 +1444,19 @@ app.get('/player/clean-embed', async (req, res) => {
                 if (shouldMute && window.player.mute) window.player.mute();
                 else if (!shouldMute) {
                   if (window.player.unmute) window.player.unmute();
-                  if (window.player.setVolume) window.player.setVolume(100);
                 }
+              }
+            }
+
+            if (data.type === 'SET_VOLUME') {
+              const vol = typeof data.volume === 'number' ? Math.max(0, Math.min(1, data.volume)) : 1;
+              document.querySelectorAll('video, audio').forEach(function(media) {
+                media.volume = vol;
+                if (vol > 0) media.muted = false;
+              });
+              if (window.player) {
+                if (window.player.setVolume) window.player.setVolume(Math.round(vol * 100));
+                if (vol > 0 && window.player.unmute) window.player.unmute();
               }
             }
 
