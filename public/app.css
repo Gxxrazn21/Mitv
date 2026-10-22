@@ -419,9 +419,23 @@ video::-webkit-media-controls {
   background: #000;
   object-fit: contain;
   display: block;
+  transform: translateZ(0);
+  -webkit-transform: translateZ(0);
+  will-change: transform;
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
 }
 .slot-iframe {
   display: none;
+}
+
+/* On TV, WebView, or low-resource devices, disable SVG/CSS filters on video to prevent black screen */
+.tv-mode video,
+.low-resource video,
+.no-filter video,
+video.no-filter {
+  filter: none !important;
+  -webkit-filter: none !important;
 }
 
 /* Overlays (Loader, Error, Empty) */

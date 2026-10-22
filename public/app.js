@@ -110,6 +110,26 @@ function initSlots() {
     const videoEl = slotEl.querySelector('.slot-video');
     const iframeEl = slotEl.querySelector('.slot-iframe');
 
+    // Force mandatory WebView / Fire OS video attributes and GPU compositing
+    if (videoEl) {
+      if (typeof videoEl.setAttribute === 'function') {
+        videoEl.setAttribute('playsinline', '');
+        videoEl.setAttribute('webkit-playsinline', 'true');
+        videoEl.setAttribute('x5-playsinline', 'true');
+        videoEl.setAttribute('preload', 'auto');
+        videoEl.setAttribute('autoplay', '');
+      }
+      videoEl.playsInline = true;
+      if (videoEl.style) {
+        videoEl.style.transform = 'translateZ(0)';
+        videoEl.style.webkitTransform = 'translateZ(0)';
+        videoEl.style.backfaceVisibility = 'hidden';
+        videoEl.style.webkitBackfaceVisibility = 'hidden';
+        videoEl.style.filter = 'none';
+        videoEl.style.webkitFilter = 'none';
+      }
+    }
+
     slots.push({
       index: i,
       slotEl,
@@ -237,6 +257,18 @@ function initSlots() {
         });
       }
       updatePlayPauseUI(slot);
+    });
+
+    // Auto-resume as soon as enough data is buffered in WebView
+    slot.videoEl.addEventListener('canplay', () => {
+      if (slot.mode === 'hls' && !slot.isUserPaused && slot.videoEl.paused) {
+        slot.videoEl.play().catch(() => {});
+      }
+    });
+    slot.videoEl.addEventListener('loadedmetadata', () => {
+      if (slot.mode === 'hls' && !slot.isUserPaused && slot.videoEl.paused) {
+        slot.videoEl.play().catch(() => {});
+      }
     });
 
     slot.videoEl.addEventListener('play', () => {
@@ -528,9 +560,15 @@ function clearSlot(slotIdx) {
   }
 
   if (slot.hlsInstance) {
+    try {
+      if (typeof slot.hlsInstance.stopLoad === 'function') slot.hlsInstance.stopLoad();
+      if (typeof slot.hlsInstance.detachMedia === 'function') slot.hlsInstance.detachMedia();
+    } catch (e) {}
     slot.hlsInstance.destroy();
     slot.hlsInstance = null;
   }
+
+  slot.generation = (slot.generation || 0) + 1;
 
   slot.videoEl.pause();
   slot.videoEl.removeAttribute('src');
@@ -583,9 +621,14 @@ async function loadStreamInSlot(slotIdx, matchData, optionIndex = 0) {
 
   // Clean prior player in this slot
   if (slot.hlsInstance) {
+    try {
+      if (typeof slot.hlsInstance.stopLoad === 'function') slot.hlsInstance.stopLoad();
+      if (typeof slot.hlsInstance.detachMedia === 'function') slot.hlsInstance.detachMedia();
+    } catch (e) {}
     slot.hlsInstance.destroy();
     slot.hlsInstance = null;
   }
+  slot.generation = (slot.generation || 0) + 1;
   slot.videoEl.pause();
   slot.videoEl.removeAttribute('src');
   slot.videoEl.load();
@@ -677,6 +720,10 @@ function setupSlotHls(slot, streamUrl, referer) {
       loadStreamInSlot(slot.index, slot.currentMatch, slot.currentOptionIdx + 1);
     } else {
       if (slot.hlsInstance) {
+        try {
+          if (typeof slot.hlsInstance.stopLoad === 'function') slot.hlsInstance.stopLoad();
+          if (typeof slot.hlsInstance.detachMedia === 'function') slot.hlsInstance.detachMedia();
+        } catch (e) {}
         slot.hlsInstance.destroy();
         slot.hlsInstance = null;
       }
@@ -692,22 +739,48 @@ function setupSlotHls(slot, streamUrl, referer) {
   slot.iframeEl.style.display = 'none';
   slot.videoEl.style.display = 'block';
 
+  // Force GPU hardware acceleration styles and strip any SVG/CSS filters that break TV WebViews
+  if (slot.videoEl.style) {
+    slot.videoEl.style.transform = 'translateZ(0)';
+    slot.videoEl.style.webkitTransform = 'translateZ(0)';
+    slot.videoEl.style.backfaceVisibility = 'hidden';
+    slot.videoEl.style.webkitBackfaceVisibility = 'hidden';
+    slot.videoEl.style.filter = 'none';
+    slot.videoEl.style.webkitFilter = 'none';
+  }
+
+  // Ensure attributes for inline playback and autoplay in WebView
+  if (typeof slot.videoEl.setAttribute === 'function') {
+    slot.videoEl.setAttribute('playsinline', '');
+    slot.videoEl.setAttribute('webkit-playsinline', 'true');
+    slot.videoEl.setAttribute('x5-playsinline', 'true');
+    slot.videoEl.setAttribute('preload', 'auto');
+  }
+  slot.videoEl.playsInline = true;
+
   // Apply current object-fit
   const currentFit = FIT_MODES[currentFitIdx].key;
-  slot.videoEl.style.objectFit = currentFit;
+  if (slot.videoEl.style) {
+    slot.videoEl.style.objectFit = currentFit;
+  }
 
   // Use playlist proxy with full URL resolution
   const proxiedM3u8 = `/api/stream/m3u8?url=${encodeURIComponent(streamUrl)}&referer=${encodeURIComponent(referer || 'https://xstream.st/')}`;
 
+  const isTvOrLowResource = (typeof lowResourceDevice !== 'undefined' && lowResourceDevice) ||
+                            (typeof isTV !== 'undefined' && isTV) ||
+                            /AFT|Fire TV|Android TV|SmartTV/i.test(navigator.userAgent);
+
   if (typeof Hls !== 'undefined' && Hls.isSupported()) {
     const hls = new Hls({
-      enableWorker: true,
+      enableWorker: !isTvOrLowResource, // Disable worker on TV/WebView to prevent thread transfer stalls
       lowLatencyMode: true,
-      capLevelToPlayerSize: false, // CLAVE: Impide que al dividir en 2 o 4 pantallas baje la calidad a 360p/480p
+      capLevelToPlayerSize: isTvOrLowResource, // Smaller TV slots need less decoding work
       startLevel: -1, // Select initial quality using measured bandwidth.
-      maxBufferLength: 30,
-      maxMaxBufferLength: 45,
-      backBufferLength: 15
+      maxBufferLength: isTvOrLowResource ? 15 : 30,
+      maxMaxBufferLength: isTvOrLowResource ? 20 : 45,
+      maxBufferSize: isTvOrLowResource ? 20 * 1000 * 1000 : 60 * 1000 * 1000,
+      backBufferLength: isTvOrLowResource ? 5 : 15
     });
 
     slot.hlsInstance = hls;
@@ -737,6 +810,10 @@ function setupSlotHls(slot, streamUrl, referer) {
             if (httpCode === 403 || httpCode === 502 || slot.networkRetryCount > 2) {
               slot.networkRetryCount = 0;
               console.warn(`[HLS] Bloqueo o caída de upstream (${httpCode || 'Red'}) en ranura ${slot.index + 1}. Alternando a opción de respaldo...`);
+              try {
+                if (typeof hls.stopLoad === 'function') hls.stopLoad();
+                if (typeof hls.detachMedia === 'function') hls.detachMedia();
+              } catch (e) {}
               hls.destroy();
               slot.hlsInstance = null;
               if (slot.currentMatch && slot.currentMatch.options && slot.currentOptionIdx + 1 < slot.currentMatch.options.length) {
@@ -753,18 +830,46 @@ function setupSlotHls(slot, streamUrl, referer) {
             console.log(`[HLS] Recuperando micro-corte de red en ranura ${slot.index + 1} (intento ${slot.networkRetryCount}/2 en ${backoffMs}ms)...`);
             setTimeout(() => {
               if (slot.hlsInstance === hls && slot.mode === 'hls') {
-                hls.startLoad();
+                if (data.details === 'manifestLoadError' || data.details === 'manifestLoadTimeOut' || slot.networkRetryCount === 1) {
+                  hls.loadSource(proxiedM3u8);
+                } else {
+                  hls.startLoad();
+                }
               }
             }, backoffMs);
             break;
 
           case Hls.ErrorTypes.MEDIA_ERROR:
             console.log(`[HLS] Error de códec/medio en ranura ${slot.index + 1}, ejecutando recoverMediaError()...`);
-            hls.recoverMediaError();
+            slot.mediaRetryCount = (slot.mediaRetryCount || 0) + 1;
+            if (slot.mediaRetryCount <= 2) {
+              if (slot.mediaRetryCount === 2 && typeof hls.swapAudioCodec === 'function') {
+                try { hls.swapAudioCodec(); } catch (e) {}
+              }
+              hls.recoverMediaError();
+            } else {
+              try {
+                if (typeof hls.stopLoad === 'function') hls.stopLoad();
+                if (typeof hls.detachMedia === 'function') hls.detachMedia();
+              } catch (e) {}
+              hls.destroy();
+              slot.hlsInstance = null;
+              if (slot.currentMatch && slot.currentOptionIdx + 1 < slot.currentMatch.options.length) {
+                loadStreamInSlot(slot.index, slot.currentMatch, slot.currentOptionIdx + 1);
+              } else {
+                slot.loaderEl.style.display = 'none';
+                slot.errorText.textContent = 'No se pudo recuperar el decodificador de video.';
+                slot.errorEl.style.display = 'flex';
+              }
+            }
             break;
 
           default:
             console.warn(`[HLS] Error crítico en ranura ${slot.index + 1}:`, data.details);
+            try {
+              if (typeof hls.stopLoad === 'function') hls.stopLoad();
+              if (typeof hls.detachMedia === 'function') hls.detachMedia();
+            } catch (e) {}
             hls.destroy();
             slot.hlsInstance = null;
             if (slot.currentMatch && slot.currentOptionIdx + 1 < slot.currentMatch.options.length) {
@@ -783,6 +888,19 @@ function setupSlotHls(slot, streamUrl, referer) {
     const isFocused = (slot.index === focusedSlotIdx);
     slot.videoEl.muted = !isFocused || isVolumeMuted;
     slot.videoEl.volume = (!isFocused || isVolumeMuted) ? 0 : currentVolume;
+
+    const onCanPlay = () => {
+      if (slot.mode === 'hls' && !slot.isUserPaused) {
+        slot.videoEl.play().catch(() => {});
+      }
+    };
+    if (typeof slot.videoEl.addEventListener === 'function') {
+      slot.videoEl.addEventListener('canplay', onCanPlay, { once: true });
+      slot.videoEl.addEventListener('loadedmetadata', onCanPlay, { once: true });
+    }
+    if (typeof slot.videoEl.load === 'function') {
+      slot.videoEl.load();
+    }
     slot.videoEl.play().catch(() => {});
   } else {
     slot.loaderEl.style.display = 'none';
