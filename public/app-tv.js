@@ -1300,7 +1300,30 @@ function setupUIEventListeners() {
       if (label) {
         label.textContent = isFull ? 'Salir' : 'Pantalla Completa';
       }
+      if (isFull) {
+        try {
+          if (typeof window !== 'undefined' && window.history && typeof window.history.pushState === 'function') {
+            window.history.pushState({ fullscreen: true }, '');
+          }
+        } catch (e) {}
+      }
     });
+
+    if (typeof window !== 'undefined' && window.addEventListener) {
+      window.addEventListener('popstate', () => {
+        const isFull = !!(document.fullscreenElement || document.documentElement.classList.contains('is-fullscreen'));
+        if (isFull) {
+          if (document.fullscreenElement) {
+            document.exitFullscreen?.().catch(() => {});
+          }
+          document.documentElement.classList.remove('is-fullscreen');
+          const label = fullscreenBtn.querySelector('span');
+          if (label) label.textContent = 'Pantalla Completa';
+          const activeSlot = document.querySelector('.stream-slot.active-audio') || document.querySelector('.stream-slot');
+          if (activeSlot && typeof activeSlot.focus === 'function') activeSlot.focus();
+        }
+      });
+    }
   }
 
   // Tabs: Matches / Channels
@@ -1408,6 +1431,27 @@ function setupKeyboardShortcuts() {
         document.documentElement.requestFullscreen?.().catch(() => {});
       } else {
         document.exitFullscreen().catch(() => {});
+      }
+    }
+
+    // Intercept Back / Escape when in fullscreen
+    if (e.key === 'Escape' || e.key === 'Backspace' || e.key === 'GoBack' || e.key === 'BrowserBack' || e.keyCode === 4 || e.keyCode === 27) {
+      const isFull = !!(document.fullscreenElement || document.documentElement.classList.contains('is-fullscreen'));
+      if (isFull) {
+        e.preventDefault();
+        e.stopPropagation();
+        if (document.fullscreenElement) {
+          document.exitFullscreen?.().catch(() => {});
+        }
+        document.documentElement.classList.remove('is-fullscreen');
+        const fullscreenBtn = document.getElementById('fullscreenBtn');
+        if (fullscreenBtn) {
+          const label = fullscreenBtn.querySelector('span');
+          if (label) label.textContent = 'Pantalla Completa';
+        }
+        const activeSlot = document.querySelector('.stream-slot.active-audio') || document.querySelector('.stream-slot');
+        if (activeSlot && typeof activeSlot.focus === 'function') activeSlot.focus();
+        return;
       }
     }
 

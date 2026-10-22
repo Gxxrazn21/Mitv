@@ -22,6 +22,12 @@
   --text-muted: #6b7280;
   
   --font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+
+  /* Safe Area Insets for Notch / Punch-hole screens (Poco, Samsung, iPhone) */
+  --safe-top: max(env(safe-area-inset-top, 0px), 28px);
+  --safe-bottom: max(env(safe-area-inset-bottom, 0px), 16px);
+  --safe-left: max(env(safe-area-inset-left, 0px), 16px);
+  --safe-right: max(env(safe-area-inset-right, 0px), 16px);
 }
 
 * {
@@ -66,24 +72,39 @@ html, body {
    Top Bar (46px Height)
    ========================================================================== */
 .topbar {
-  height: 46px;
   min-height: 46px;
-  max-height: 46px;
   background: var(--bg-panel);
   border-bottom: 1px solid var(--border-subtle);
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 12px;
-  gap: 12px;
+  padding: 0 clamp(10px, 1.5vw, 20px);
+  gap: clamp(6px, 1.2vw, 16px);
   user-select: none;
   z-index: 100;
+  box-sizing: border-box;
 }
 
-.topbar-left, .topbar-center, .topbar-right {
+.topbar-left {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: clamp(6px, 1vw, 12px);
+  flex-shrink: 0;
+}
+
+.topbar-center {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.topbar-right {
+  display: flex;
+  align-items: center;
+  gap: clamp(6px, 1vw, 12px);
+  flex-shrink: 0;
 }
 
 /* Brand */
@@ -147,7 +168,8 @@ html, body {
   padding: 5px 12px;
   border-radius: 4px;
   cursor: pointer;
-  transition: all 0.15s cubic-bezier(0.16, 1, 0.3, 1);
+  transition: transform 0.18s cubic-bezier(0.22, 1, 0.36, 1), box-shadow 0.18s ease, background-color 0.18s ease, color 0.18s ease;
+  will-change: transform;
   white-space: nowrap;
 }
 .seg-btn svg {
@@ -181,8 +203,10 @@ html, body {
   padding: 6px 12px;
   border-radius: 6px;
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: transform 0.18s cubic-bezier(0.22, 1, 0.36, 1), box-shadow 0.18s ease, background-color 0.18s ease, border-color 0.18s ease, color 0.18s ease;
+  will-change: transform;
   user-select: none;
+  flex-shrink: 0;
 }
 .topbar-btn svg {
   flex-shrink: 0;
@@ -194,7 +218,7 @@ html, body {
   border-color: var(--border-active);
 }
 .topbar-btn:active {
-  transform: scale(0.97);
+  transform: scale(0.93);
 }
 
 /* Toggle Sidebar / Partidos Button */
@@ -210,8 +234,10 @@ html, body {
   padding: 6px 14px;
   border-radius: 6px;
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: transform 0.18s cubic-bezier(0.22, 1, 0.36, 1), box-shadow 0.18s ease, background-color 0.18s ease, border-color 0.18s ease;
+  will-change: transform;
   user-select: none;
+  flex-shrink: 0;
 }
 .toggle-sidebar-btn:hover {
   background: var(--bg-card-hover);
@@ -219,7 +245,22 @@ html, body {
   box-shadow: 0 0 12px var(--accent-purple-glow);
 }
 .toggle-sidebar-btn:active {
-  transform: scale(0.97);
+  transform: scale(0.93);
+}
+
+/* Subtle elevation and glow on desktop hover */
+@media (hover: hover) and (pointer: fine) {
+  .topbar-btn:hover {
+    transform: translateY(-2px) scale(1.03);
+    box-shadow: 0 4px 12px rgba(147, 51, 234, 0.25);
+  }
+  .toggle-sidebar-btn:hover {
+    transform: translateY(-2px) scale(1.03);
+    box-shadow: 0 4px 14px var(--accent-purple-glow);
+  }
+  .seg-btn:hover:not(.active) {
+    transform: translateY(-1px) scale(1.02);
+  }
 }
 
 /* ==========================================================================
@@ -390,15 +431,21 @@ video::-webkit-media-controls {
   color: #fff;
   font-size: 10.5px;
   font-weight: 700;
-  padding: 2px 7px;
-  border-radius: 3px;
+  padding: 3px 8px;
+  border-radius: 4px;
   display: none;
   align-items: center;
   gap: 4px;
   pointer-events: none;
+  transition: opacity 0.18s ease;
 }
 .stream-slot.active-audio .slot-audio-badge {
   display: flex;
+}
+.stream-slot:hover .slot-audio-badge,
+.stream-slot:focus-within .slot-audio-badge {
+  opacity: 0;
+  pointer-events: none;
 }
 
 /* Floating Slot Bar on Hover */
@@ -407,23 +454,27 @@ video::-webkit-media-controls {
   top: 0;
   left: 0;
   right: 0;
-  height: 30px;
-  background: linear-gradient(to bottom, rgba(7, 7, 9, 0.85), transparent);
-  z-index: 9;
+  height: clamp(32px, 4.5vh, 40px);
+  background: linear-gradient(to bottom, rgba(7, 7, 9, 0.95) 0%, rgba(7, 7, 9, 0.75) 60%, transparent 100%);
+  z-index: 15;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 8px 0 95px;
+  padding: 0 clamp(8px, 1.2vw, 14px);
+  gap: clamp(6px, 1vw, 12px);
   opacity: 0;
   transition: opacity 0.2s ease;
   pointer-events: none;
 }
-.stream-slot:hover .slot-floating-bar {
+.stream-slot:hover .slot-floating-bar,
+.stream-slot:focus-within .slot-floating-bar {
   opacity: 1;
   pointer-events: auto;
 }
 .slot-title {
-  font-size: 11px;
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: clamp(10.5px, 0.9vw, 12.5px);
   font-weight: 600;
   color: var(--text-main);
   white-space: nowrap;
@@ -432,20 +483,34 @@ video::-webkit-media-controls {
 }
 .slot-actions {
   display: flex;
-  gap: 4px;
+  align-items: center;
+  gap: clamp(4px, 0.6vw, 8px);
+  flex-shrink: 0;
 }
 .slot-mini-btn {
-  background: rgba(17, 17, 21, 0.85);
+  background: rgba(20, 20, 26, 0.9);
   border: 1px solid var(--border-subtle);
   color: var(--text-secondary);
-  font-size: 11px;
-  padding: 2px 6px;
-  border-radius: 3px;
+  font-size: clamp(10px, 0.8vw, 12px);
+  padding: clamp(3px, 0.5vh, 6px) clamp(6px, 0.8vw, 10px);
+  min-height: clamp(26px, 3.5vh, 32px);
+  border-radius: 4px;
   cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: transform 0.18s cubic-bezier(0.22, 1, 0.36, 1), box-shadow 0.18s ease, background-color 0.18s ease, color 0.18s ease;
+  will-change: transform;
 }
 .slot-mini-btn:hover {
   background: var(--accent-purple);
   color: #fff;
+  transform: translateY(-1px) scale(1.08);
+  box-shadow: 0 2px 8px var(--accent-purple-glow);
+}
+.slot-mini-btn:active {
+  transform: scale(0.93);
 }
 .slot-mini-btn.slot-playpause {
   font-size: 10px;
@@ -1127,13 +1192,19 @@ video.no-filter {
   }
 
   .topbar {
-    height: 44px;
-    min-height: 44px;
-    max-height: 44px;
-    padding: 0 10px;
-    gap: 8px;
-    flex-shrink: 0;
+    padding-top: var(--safe-top);
+    padding-left: var(--safe-left);
+    padding-right: var(--safe-right);
+    padding-bottom: 4px;
+    min-height: calc(44px + var(--safe-top));
+    height: auto;
+    max-height: none;
+    box-sizing: border-box;
+    display: flex;
+    align-items: center;
     justify-content: space-between;
+    gap: clamp(6px, 1.5vw, 12px);
+    flex-shrink: 0;
   }
 
   .topbar-left {
@@ -1156,33 +1227,43 @@ video.no-filter {
   }
 
   .seg-btn {
-    padding: 4px 8px;
-    font-size: 11.5px;
+    padding: clamp(4px, 0.8vh, 6px) clamp(6px, 1.5vw, 10px);
+    font-size: clamp(11px, 2.5vw, 12px);
+    min-height: 32px;
     gap: 4px;
     touch-action: manipulation;
+    flex-shrink: 0;
   }
   .topbar-btn {
-    padding: 5px 8px;
-    font-size: 11.5px;
+    padding: clamp(5px, 0.8vh, 7px) clamp(8px, 1.5vw, 12px);
+    font-size: clamp(11px, 2.5vw, 12px);
+    min-height: 32px;
     touch-action: manipulation;
+    flex-shrink: 0;
   }
   .topbar-btn span {
     display: none;
   }
   .toggle-sidebar-btn {
-    padding: 5px 10px;
-    font-size: 11.5px;
+    padding: clamp(5px, 0.8vh, 7px) clamp(10px, 2vw, 14px);
+    font-size: clamp(11px, 2.5vw, 12px);
+    min-height: 32px;
     touch-action: manipulation;
+    flex-shrink: 0;
   }
   .toggle-sidebar-btn span {
     display: inline;
   }
 
-  /* App Stage Container (100dvh - 44px) */
+  /* App Stage Container */
   .app-stage {
     flex-direction: column;
-    height: calc(100vh - 44px);
-    height: calc(100dvh - 44px);
+    height: calc(100vh - 44px - var(--safe-top));
+    height: calc(100dvh - 44px - var(--safe-top));
+    padding-bottom: var(--safe-bottom);
+    padding-left: var(--safe-left);
+    padding-right: var(--safe-right);
+    box-sizing: border-box;
     min-height: 0;
     width: 100vw;
     overflow: hidden;

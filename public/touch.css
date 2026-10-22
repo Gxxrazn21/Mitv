@@ -1,7 +1,14 @@
 /* ==========================================================================
-   MiTV — Touch scrolling, layout stability & gesture isolation
-   Guarantees independent, smooth 60/120fps list scroll without video conflict.
+   MiTV — Touch scrolling, notch safe-area & gesture isolation
+   Guarantees independent, smooth 60/120fps list scroll, notch clearance & touch animations.
    ========================================================================== */
+
+:root {
+  --safe-top: max(env(safe-area-inset-top, 0px), 28px);
+  --safe-bottom: max(env(safe-area-inset-bottom, 0px), 16px);
+  --safe-left: max(env(safe-area-inset-left, 0px), 16px);
+  --safe-right: max(env(safe-area-inset-right, 0px), 16px);
+}
 
 @media (pointer: coarse), (max-width: 860px) {
   html:not(.tv-mode),
@@ -11,8 +18,21 @@
     -webkit-overflow-scrolling: touch !important;
   }
 
+  /* Safe Area Header Clearance for Notch / Punch-hole screens */
+  html:not(.tv-mode) .topbar {
+    padding-top: var(--safe-top);
+    padding-left: var(--safe-left);
+    padding-right: var(--safe-right);
+    min-height: calc(44px + var(--safe-top));
+    box-sizing: border-box;
+  }
+
   html:not(.tv-mode) .app-stage {
     min-height: 0 !important;
+    padding-bottom: var(--safe-bottom);
+    padding-left: var(--safe-left);
+    padding-right: var(--safe-right);
+    box-sizing: border-box;
     overscroll-behavior: none !important;
     overscroll-behavior-y: none !important;
   }
@@ -84,5 +104,70 @@
     touch-action: pan-x !important;
     overscroll-behavior-x: contain !important;
     -webkit-overflow-scrolling: touch !important;
+  }
+
+  /* Hardware-accelerated fluid touch micro-interactions */
+  button,
+  .seg-btn,
+  .topbar-btn,
+  .toggle-sidebar-btn,
+  .filter-chip,
+  .server-chip,
+  .slot-mini-btn,
+  .slot-retry-btn,
+  .tool-chip,
+  .event-card {
+    transition: transform 0.18s cubic-bezier(0.22, 1, 0.36, 1), box-shadow 0.18s ease, background-color 0.18s ease, filter 0.18s ease !important;
+    -webkit-tap-highlight-color: transparent !important;
+  }
+
+  button:active,
+  .seg-btn:active,
+  .topbar-btn:active,
+  .toggle-sidebar-btn:active,
+  .filter-chip:active,
+  .server-chip:active,
+  .slot-mini-btn:active,
+  .slot-retry-btn:active,
+  .tool-chip:active,
+  .event-card:active {
+    transform: scale(0.93) !important;
+    filter: brightness(1.2);
+  }
+}
+
+/* Prevent sticky hover on touch devices */
+@media (hover: none) {
+  .seg-btn:hover:not(.active),
+  .topbar-btn:hover,
+  .toggle-sidebar-btn:hover,
+  .filter-chip:hover:not(.active),
+  .server-chip:hover:not(.active),
+  .event-card:hover {
+    background: inherit;
+    transform: none !important;
+    box-shadow: none !important;
+  }
+}
+
+/* Landscape orientation on mobile (Poco X8 Pro Max, Samsung S26 Ultra) */
+@media (pointer: coarse) and (orientation: landscape), (max-width: 950px) and (orientation: landscape) {
+  html:not(.tv-mode) .topbar {
+    padding-top: max(env(safe-area-inset-top, 0px), 6px);
+    padding-left: var(--safe-left);
+    padding-right: var(--safe-right);
+    min-height: 40px;
+    height: 40px;
+  }
+
+  html:not(.tv-mode) .app-stage {
+    padding-left: var(--safe-left);
+    padding-right: var(--safe-right);
+    padding-bottom: var(--safe-bottom);
+  }
+
+  html:not(.tv-mode) .slot-floating-bar {
+    padding-left: max(var(--safe-left), 12px);
+    padding-right: max(var(--safe-right), 12px);
   }
 }

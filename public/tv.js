@@ -53,12 +53,31 @@ document.addEventListener('DOMContentLoaded', () => {
   document.addEventListener('keydown', e => {
     const key = e.key;
     const active = document.activeElement;
-    if (key === 'Escape' || key === 'BrowserBack' || key === 'GoBack') {
+    if (key === 'Escape' || key === 'BrowserBack' || key === 'GoBack' || key === 'Backspace' || e.keyCode === 4 || e.keyCode === 27) {
       if (modal.style.display !== 'none') {
         e.preventDefault(); e.stopImmediatePropagation();
         document.getElementById('closePhoneModalBtn').click();
-      } else if (active.closest('.stream-slot')) {
+        return;
+      }
+      const isFull = !!(document.fullscreenElement || document.documentElement.classList.contains('is-fullscreen'));
+      if (isFull) {
+        e.preventDefault(); e.stopImmediatePropagation();
+        if (document.fullscreenElement) {
+          document.exitFullscreen?.().catch(() => {});
+        }
+        document.documentElement.classList.remove('is-fullscreen');
+        const fullscreenBtn = document.getElementById('fullscreenBtn');
+        if (fullscreenBtn) {
+          const label = fullscreenBtn.querySelector('span');
+          if (label) label.textContent = 'Pantalla Completa';
+        }
+        const activeSlot = document.querySelector('.stream-slot.active-audio') || document.querySelector('.stream-slot');
+        focus(activeSlot || document.getElementById('toggleSidebarBtn'));
+        return;
+      }
+      if (active && active.closest && active.closest('.stream-slot')) {
         e.preventDefault(); focus(document.getElementById('toggleSidebarBtn'));
+        return;
       }
       return;
     }
