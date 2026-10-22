@@ -1,11 +1,14 @@
 // MiTV Service Worker - PWA & Cache Management
-const CACHE_NAME = 'mitv-v6.0';
+const CACHE_NAME = 'mitv-v7.0';
 const STATIC_ASSETS = [
   '/',
   '/index.html',
   '/app.css',
   '/app.js',
-  '/manifest.json'
+  '/manifest.json',
+  '/icon-192.png',
+  '/icon-512.png',
+  '/apple-touch-icon.png'
 ];
 
 self.addEventListener('install', (event) => {
