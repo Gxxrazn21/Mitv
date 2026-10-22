@@ -103,7 +103,11 @@ function normalizeSourceUrl(rawUrl, base = 'https://pirlotv.la/') {
       const decodedParam = decodeURIComponent(b64Match[1]);
       const targetFromB64 = Buffer.from(decodedParam, 'base64').toString('utf8');
       if (targetFromB64 && targetFromB64.startsWith('http')) {
-        return targetFromB64;
+        let clean = targetFromB64;
+        if (clean.includes('playvi.org')) {
+          clean = clean.replace('playvi.org', 'cdplay.live');
+        }
+        return clean;
       }
     } catch (e) {}
   }
@@ -115,18 +119,122 @@ function normalizeSourceUrl(rawUrl, base = 'https://pirlotv.la/') {
   }
 }
 
-async function safeFetch(url, options = {}, timeoutMs = 9000) {
+// Lightweight cookie store for CDN edge sessions (Host -> Cookie string)
+const streamCookieStore = new Map();
+
+function saveCookiesForUrl(url, setCookieHeader) {
+  if (!url || !setCookieHeader) return;
+  try {
+    const domain = new URL(url).hostname;
+    const cookies = Array.isArray(setCookieHeader) ? setCookieHeader.join('; ') : String(setCookieHeader);
+    const pairs = cookies
+      .split(/[,;]/)
+      .map(c => c.trim())
+      .filter(c => c && !c.toLowerCase().startsWith('path=') && !c.toLowerCase().startsWith('domain=') && !c.toLowerCase().startsWith('expires=') && !c.toLowerCase().startsWith('samesite=') && !c.toLowerCase().startsWith('max-age=') && !c.toLowerCase().startsWith('secure') && !c.toLowerCase().startsWith('httponly'))
+      .join('; ');
+
+    if (pairs) {
+      const existing = streamCookieStore.get(domain) || '';
+      const merged = existing ? `${existing}; ${pairs}` : pairs;
+      streamCookieStore.set(domain, merged);
+      if (streamCookieStore.size > 200) {
+        const firstKey = streamCookieStore.keys().next().value;
+        streamCookieStore.delete(firstKey);
+      }
+    }
+  } catch (e) {}
+}
+
+function getCookiesForUrl(url, explicitCookie = null) {
+  if (explicitCookie) return explicitCookie;
+  try {
+    const domain = new URL(url).hostname;
+    return streamCookieStore.get(domain) || '';
+  } catch (e) {
+    return '';
+  }
+}
+
+function getLegitimateHeaders(targetUrl, incomingReferer = null, customHeaders = {}) {
+  let targetObj = null;
+  try {
+    targetObj = new URL(targetUrl);
+  } catch (e) {}
+
+  let effectiveReferer = incomingReferer;
+  if (!effectiveReferer || effectiveReferer.includes('localhost') || effectiveReferer.includes('127.0.0.1')) {
+    if (targetObj) {
+      const host = targetObj.hostname.toLowerCase();
+      if (host.includes('cdplay.live')) {
+        effectiveReferer = 'https://cdplay.live/';
+      } else if (host.includes('instreams.xyz')) {
+        effectiveReferer = 'https://instreams.xyz/';
+      } else if (host.includes('gate4.st') || host.includes('xstream.st')) {
+        effectiveReferer = 'https://xstream.st/';
+      } else if (host.includes('streamtp.live')) {
+        effectiveReferer = 'https://streamtp.live/';
+      } else if (host.includes('rudo.video')) {
+        effectiveReferer = 'https://rudo.video/';
+      } else if (host.includes('pirlotv')) {
+        effectiveReferer = 'https://pirlotv.la/';
+      } else {
+        effectiveReferer = `${targetObj.protocol}//${targetObj.hostname}/`;
+      }
+    } else {
+      effectiveReferer = 'https://cdplay.live/';
+    }
+  }
+
+  let effectiveOrigin = 'https://cdplay.live';
+  try {
+    effectiveOrigin = new URL(effectiveReferer).origin;
+  } catch (e) {
+    if (targetObj) effectiveOrigin = targetObj.origin;
+  }
+
+  return {
+    'User-Agent': USER_AGENT,
+    'Accept': '*/*',
+    'Accept-Language': 'es-ES,es;q=0.9,en;q=0.8',
+    'Sec-Ch-Ua': '"Chromium";v="126", "Not/A)Brand";v="8", "Google Chrome";v="126"',
+    'Sec-Ch-Ua-Mobile': '?0',
+    'Sec-Ch-Ua-Platform': '"Windows"',
+    'Sec-Fetch-Dest': 'empty',
+    'Sec-Fetch-Mode': 'cors',
+    'Sec-Fetch-Site': 'cross-site',
+    'Referer': effectiveReferer,
+    'Origin': effectiveOrigin,
+    'Connection': 'keep-alive',
+    ...customHeaders
+  };
+}
+
+async function safeFetch(url, options = {}, timeoutMs = 12000) {
   const controller = new AbortController();
   const id = setTimeout(() => controller.abort(), timeoutMs);
   try {
+    const incomingRef = options.headers?.['Referer'] || options.headers?.['referer'] || null;
+    const defaultHeaders = getLegitimateHeaders(url, incomingRef);
+    const cookie = getCookiesForUrl(url, options.headers?.['Cookie'] || options.headers?.['cookie']);
+    if (cookie) {
+      defaultHeaders['Cookie'] = cookie;
+    }
+
     const res = await fetch(url, {
+      redirect: 'follow',
       ...options,
       signal: controller.signal,
       headers: {
-        'User-Agent': USER_AGENT,
+        ...defaultHeaders,
         ...(options.headers || {})
       }
     });
+
+    const setCookie = res.headers.get('set-cookie');
+    if (setCookie) {
+      saveCookiesForUrl(res.url || url, setCookie);
+    }
+
     return res;
   } finally {
     clearTimeout(id);
@@ -263,70 +371,109 @@ function parseChannels(html) {
 function extractFallbackChannels(homeHtml) {
   const BASELINE_CHANNELS = [
     { name: 'DSPORTS (DirecTV Sports)', category: 'DSPORTS', options: [
-      { name: 'Opción 1 SD', url: 'https://pirlotv.la/en-vivo/dsports.php', isHD: false },
-      { name: 'Opción 2 HD', url: 'https://pirlotv.la/eventoshd.php?r=aHR0cHM6Ly9wbGF5dmkub3JnL2RzcG9ydHNoZC5waHA=', isHD: true }
+      { name: 'Opción 1 HD (Directa)', url: 'https://cdplay.live/dsports.php', isHD: true },
+      { name: 'Opción 2 HD (CDN)', url: 'https://pirlotv.la/eventoshd.php?r=aHR0cHM6Ly9jZHBsYXkubGl2ZS9kc3BvcnRzLnBocA==', isHD: true },
+      { name: 'Opción 3 SD (Mirror)', url: 'https://pirlotv.la/en-vivo/dsports.php', isHD: false }
     ]},
     { name: 'DSPORTS 2', category: 'DSPORTS', options: [
-      { name: 'Opción 1 SD', url: 'https://pirlotv.la/en-vivo/dsports-2.php', isHD: false },
-      { name: 'Opción 2 HD', url: 'https://pirlotv.la/eventoshd.php?r=aHR0cHM6Ly9wbGF5dmkub3JnL2RzcG9ydHMyaGQucGhw', isHD: true }
+      { name: 'Opción 1 HD (Directa)', url: 'https://cdplay.live/dsports2.php', isHD: true },
+      { name: 'Opción 2 HD (CDN)', url: 'https://pirlotv.la/eventoshd.php?r=aHR0cHM6Ly9jZHBsYXkubGl2ZS9kc3BvcnRzMi5waHA=', isHD: true },
+      { name: 'Opción 3 SD (Mirror)', url: 'https://pirlotv.la/en-vivo/dsports-2.php', isHD: false }
     ]},
     { name: 'DSPORTS +', category: 'DSPORTS', options: [
-      { name: 'Opción 1 SD', url: 'https://pirlotv.la/en-vivo/dsports-plus.php', isHD: false },
-      { name: 'Opción 2 HD', url: 'https://pirlotv.la/eventoshd.php?r=aHR0cHM6Ly9wbGF5dmkub3JnL2RzcG9ydHNwbHVzaGQucGhw', isHD: true }
+      { name: 'Opción 1 HD (Directa)', url: 'https://cdplay.live/dsportsplus.php', isHD: true },
+      { name: 'Opción 2 HD (CDN)', url: 'https://pirlotv.la/eventoshd.php?r=aHR0cHM6Ly9jZHBsYXkubGl2ZS9kc3BvcnRzcGx1cy5waHA=', isHD: true },
+      { name: 'Opción 3 SD (Mirror)', url: 'https://pirlotv.la/en-vivo/dsports-plus.php', isHD: false }
     ]},
     { name: 'ESPN', category: 'ESPN', options: [
-      { name: 'Opción 1 SD', url: 'https://pirlotv.la/en-vivo/espn.php', isHD: false },
-      { name: 'Opción 2 HD', url: 'https://pirlotv.la/eventoshd.php?r=aHR0cHM6Ly9wbGF5dmkub3JnL2VzcG5oZC5waHA=', isHD: true }
+      { name: 'Opción 1 HD (Directa)', url: 'https://cdplay.live/espn.php', isHD: true },
+      { name: 'Opción 2 HD (CDN)', url: 'https://pirlotv.la/eventoshd.php?r=aHR0cHM6Ly9jZHBsYXkubGl2ZS9lc3BuLnBocA==', isHD: true },
+      { name: 'Opción 3 SD (Mirror)', url: 'https://pirlotv.la/en-vivo/espn.php', isHD: false }
     ]},
     { name: 'ESPN 2', category: 'ESPN', options: [
-      { name: 'Opción 1 SD', url: 'https://pirlotv.la/en-vivo/espn-2.php', isHD: false },
-      { name: 'Opción 2 HD', url: 'https://pirlotv.la/eventoshd.php?r=aHR0cHM6Ly9wbGF5dmkub3JnL2VzcG4yaGQucGhw', isHD: true }
+      { name: 'Opción 1 HD (Directa)', url: 'https://cdplay.live/espn2.php', isHD: true },
+      { name: 'Opción 2 HD (CDN)', url: 'https://pirlotv.la/eventoshd.php?r=aHR0cHM6Ly9jZHBsYXkubGl2ZS9lc3BuMi5waHA=', isHD: true },
+      { name: 'Opción 3 SD (Mirror)', url: 'https://pirlotv.la/en-vivo/espn-2.php', isHD: false }
     ]},
     { name: 'ESPN 3', category: 'ESPN', options: [
-      { name: 'Opción 1 SD', url: 'https://pirlotv.la/en-vivo/espn-3.php', isHD: false },
-      { name: 'Opción 2 HD', url: 'https://pirlotv.la/eventoshd.php?r=aHR0cHM6Ly9wbGF5dmkub3JnL2VzcG4zaGQucGhw', isHD: true }
+      { name: 'Opción 1 HD (Directa)', url: 'https://cdplay.live/espn3.php', isHD: true },
+      { name: 'Opción 2 HD (CDN)', url: 'https://pirlotv.la/eventoshd.php?r=aHR0cHM6Ly9jZHBsYXkubGl2ZS9lc3BuMy5waHA=', isHD: true },
+      { name: 'Opción 3 SD (Mirror)', url: 'https://pirlotv.la/en-vivo/espn-3.php', isHD: false }
     ]},
     { name: 'ESPN 4', category: 'ESPN', options: [
-      { name: 'Opción 1 SD', url: 'https://pirlotv.la/en-vivo/espn-4.php', isHD: false },
-      { name: 'Opción 2 HD', url: 'https://pirlotv.la/eventoshd.php?r=aHR0cHM6Ly9wbGF5dmkub3JnL2VzcG40aGQucGhw', isHD: true }
+      { name: 'Opción 1 HD (Directa)', url: 'https://cdplay.live/espn4.php', isHD: true },
+      { name: 'Opción 2 HD (CDN)', url: 'https://pirlotv.la/eventoshd.php?r=aHR0cHM6Ly9jZHBsYXkubGl2ZS9lc3BuNC5waHA=', isHD: true },
+      { name: 'Opción 3 SD (Mirror)', url: 'https://pirlotv.la/en-vivo/espn-4.php', isHD: false }
     ]},
     { name: 'ESPN 5', category: 'ESPN', options: [
-      { name: 'Opción 1 SD', url: 'https://pirlotv.la/en-vivo/espn-5.php', isHD: false },
-      { name: 'Opción 2 HD', url: 'https://pirlotv.la/eventoshd.php?r=aHR0cHM6Ly9wbGF5dmkub3JnL2VzcG41aGQucGhw', isHD: true }
+      { name: 'Opción 1 HD (Directa)', url: 'https://cdplay.live/espn5.php', isHD: true },
+      { name: 'Opción 2 HD (CDN)', url: 'https://pirlotv.la/eventoshd.php?r=aHR0cHM6Ly9jZHBsYXkubGl2ZS9lc3BuNS5waHA=', isHD: true },
+      { name: 'Opción 3 SD (Mirror)', url: 'https://pirlotv.la/en-vivo/espn-5.php', isHD: false }
     ]},
     { name: 'ESPN Premium Argentina', category: 'ESPN', options: [
-      { name: 'Opción 1 SD', url: 'https://pirlotv.la/en-vivo/espn-premium.php', isHD: false },
-      { name: 'Opción 2 HD', url: 'https://pirlotv.la/eventoshd.php?r=aHR0cHM6Ly9wbGF5dmkub3JnL2VzcG5wcmVtaXVtaGQucGhw', isHD: true }
+      { name: 'Opción 1 HD (Directa)', url: 'https://cdplay.live/espnpremium.php', isHD: true },
+      { name: 'Opción 2 HD (CDN)', url: 'https://pirlotv.la/eventoshd.php?r=aHR0cHM6Ly9jZHBsYXkubGl2ZS9lc3BucHJlbWl1bS5waHA=', isHD: true },
+      { name: 'Opción 3 SD (Mirror)', url: 'https://pirlotv.la/en-vivo/espn-premium.php', isHD: false }
     ]},
     { name: 'TNT Sports Premium Argentina', category: 'TNT Sports', options: [
-      { name: 'Opción 1 SD', url: 'https://pirlotv.la/en-vivo/tnt-sports-argentina.php', isHD: false },
-      { name: 'Opción 2 HD', url: 'https://pirlotv.la/eventoshd.php?r=aHR0cHM6Ly9wbGF5dmkub3JnL3RudGFyZ2VudGluYWhkLnBocA==', isHD: true }
+      { name: 'Opción 1 HD (Directa)', url: 'https://cdplay.live/tntsports.php', isHD: true },
+      { name: 'Opción 2 HD (CDN)', url: 'https://pirlotv.la/eventoshd.php?r=aHR0cHM6Ly9jZHBsYXkubGl2ZS90bnRzcG9ydHMucGhw', isHD: true },
+      { name: 'Opción 3 SD (Mirror)', url: 'https://pirlotv.la/en-vivo/tnt-sports-argentina.php', isHD: false }
     ]},
     { name: 'TNT Sports Premium Chile', category: 'TNT Sports', options: [
-      { name: 'Opción 1 SD', url: 'https://pirlotv.la/en-vivo/tnt-sports-chile.php', isHD: false },
-      { name: 'Opción 2 HD', url: 'https://pirlotv.la/eventoshd.php?r=aHR0cHM6Ly9wbGF5dmkub3JnL3RudGNoaWxlaGQucGhw', isHD: true }
+      { name: 'Opción 1 HD (Directa)', url: 'https://cdplay.live/tntchile.php', isHD: true },
+      { name: 'Opción 2 HD (CDN)', url: 'https://pirlotv.la/eventoshd.php?r=aHR0cHM6Ly9jZHBsYXkubGl2ZS90bnRjaGlsZS5waHA=', isHD: true },
+      { name: 'Opción 3 SD (Mirror)', url: 'https://pirlotv.la/en-vivo/tnt-sports-chile.php', isHD: false }
     ]},
     { name: 'Win Sports', category: 'Win Sports', options: [
-      { name: 'Opción 1 SD', url: 'https://pirlotv.la/en-vivo/win-sports.php', isHD: false },
-      { name: 'Opción 2 HD', url: 'https://pirlotv.la/eventoshd.php?r=aHR0cHM6Ly9wbGF5dmkub3JnL3dpbnNwb3J0c2hkLnBocA==', isHD: true }
+      { name: 'Opción 1 HD (Directa)', url: 'https://cdplay.live/winsports.php', isHD: true },
+      { name: 'Opción 2 HD (CDN)', url: 'https://pirlotv.la/eventoshd.php?r=aHR0cHM6Ly9jZHBsYXkubGl2ZS93aW5zcG9ydHMucGhw', isHD: true },
+      { name: 'Opción 3 SD (Mirror)', url: 'https://pirlotv.la/en-vivo/win-sports.php', isHD: false }
     ]},
     { name: 'Win Sports +', category: 'Win Sports', options: [
-      { name: 'Opción 1 SD', url: 'https://pirlotv.la/en-vivo/win-sports-plus.php', isHD: false },
-      { name: 'Opción 2 HD', url: 'https://pirlotv.la/eventoshd.php?r=aHR0cHM6Ly9wbGF5dmkub3JnL3dpbnNwb3J0c3BsdXNoZC5waHA=', isHD: true }
+      { name: 'Opción 1 HD (Directa)', url: 'https://cdplay.live/winsportsplus.php', isHD: true },
+      { name: 'Opción 2 HD (CDN)', url: 'https://pirlotv.la/eventoshd.php?r=aHR0cHM6Ly9jZHBsYXkubGl2ZS93aW5zcG9ydHNwbHVzLnBocA==', isHD: true },
+      { name: 'Opción 3 SD (Mirror)', url: 'https://pirlotv.la/en-vivo/win-sports-plus.php', isHD: false }
     ]},
     { name: 'TUDN', category: 'Internacionales', options: [
-      { name: 'Opción 1 SD', url: 'https://pirlotv.la/en-vivo/tudn.php', isHD: false },
-      { name: 'Opción 2 HD', url: 'https://pirlotv.la/eventoshd.php?r=aHR0cHM6Ly9wbGF5dmkub3JnL3R1ZG5oZC5waHA=', isHD: true }
+      { name: 'Opción 1 HD (Directa)', url: 'https://cdplay.live/tudn.php', isHD: true },
+      { name: 'Opción 2 HD (CDN)', url: 'https://pirlotv.la/eventoshd.php?r=aHR0cHM6Ly9jZHBsYXkubGl2ZS90dWRuLnBocA==', isHD: true },
+      { name: 'Opción 3 SD (Mirror)', url: 'https://pirlotv.la/en-vivo/tudn.php', isHD: false }
     ]},
     { name: 'Formula 1', category: 'Motorsport', options: [
-      { name: 'Opción 1 SD', url: 'https://pirlotv.la/en-vivo/formula-1.php', isHD: false },
-      { name: 'Opción 2 HD', url: 'https://pirlotv.la/eventoshd.php?r=aHR0cHM6Ly9wbGF5dmkub3JnL2Zvcm11bGExaGQucGhw', isHD: true }
+      { name: 'Opción 1 HD (Directa)', url: 'https://cdplay.live/f1.php', isHD: true },
+      { name: 'Opción 2 HD (CDN)', url: 'https://pirlotv.la/eventoshd.php?r=aHR0cHM6Ly9jZHBsYXkubGl2ZS9mMS5waHA=', isHD: true },
+      { name: 'Opción 3 SD (Mirror)', url: 'https://pirlotv.la/en-vivo/formula-1.php', isHD: false }
     ]},
     { name: 'Capo Deportes 1', category: 'Capo Deportes', options: [
-      { name: 'Opción 1 SD', url: 'https://pirlotv.la/capo-deportes.php', isHD: false }
+      { name: 'Opción 1 HD (Directa)', url: 'https://cdplay.live/capodeportes.php', isHD: true },
+      { name: 'Opción 2 SD (Mirror)', url: 'https://pirlotv.la/capo-deportes.php', isHD: false }
     ]},
     { name: 'Capo Deportes 2', category: 'Capo Deportes', options: [
-      { name: 'Opción 1 SD', url: 'https://pirlotv.la/capo-deportes-2.php', isHD: false }
+      { name: 'Opción 1 HD (Directa)', url: 'https://cdplay.live/capodeportes2.php', isHD: true },
+      { name: 'Opción 2 SD (Mirror)', url: 'https://pirlotv.la/capo-deportes-2.php', isHD: false }
+    ]},
+    { name: 'TyC Sports', category: 'Fútbol TV', options: [
+      { name: 'Opción 1 HD (Directa)', url: 'https://cdplay.live/tycsports.php', isHD: true },
+      { name: 'Opción 2 HD (CDN)', url: 'https://pirlotv.la/eventoshd.php?r=aHR0cHM6Ly9jZHBsYXkubGl2ZS90eWNzcG9ydHMucGhw', isHD: true },
+      { name: 'Opción 3 SD (Mirror)', url: 'https://pirlotv.la/en-vivo/tyc-sports.php', isHD: false }
+    ]},
+    { name: 'Fox Sports 1', category: 'Fox Sports', options: [
+      { name: 'Opción 1 HD (Directa)', url: 'https://cdplay.live/foxsports.php', isHD: true },
+      { name: 'Opción 2 HD (CDN)', url: 'https://pirlotv.la/eventoshd.php?r=aHR0cHM6Ly9jZHBsYXkubGl2ZS9mb3hzcG9ydHMucGhw', isHD: true },
+      { name: 'Opción 3 SD (Mirror)', url: 'https://pirlotv.la/en-vivo/fox-sports.php', isHD: false }
+    ]},
+    { name: 'Liga 1 Max Perú', category: 'Fútbol TV', options: [
+      { name: 'Opción 1 HD (Directa)', url: 'https://cdplay.live/liga1max.php', isHD: true },
+      { name: 'Opción 2 HD (CDN)', url: 'https://pirlotv.la/eventoshd.php?r=aHR0cHM6Ly9jZHBsYXkubGl2ZS9saWdhMW1heC5waHA=', isHD: true }
+    ]},
+    { name: 'Gol Perú', category: 'Fútbol TV', options: [
+      { name: 'Opción 1 HD (Directa)', url: 'https://cdplay.live/golperu.php', isHD: true },
+      { name: 'Opción 2 HD (CDN)', url: 'https://pirlotv.la/eventoshd.php?r=aHR0cHM6Ly9jZHBsYXkubGl2ZS9nb2xwZXJ1LnBocA==', isHD: true }
+    ]},
+    { name: 'Telemundo USA', category: 'Internacionales', options: [
+      { name: 'Opción 1 HD (Directa)', url: 'https://cdplay.live/telemundo.php', isHD: true },
+      { name: 'Opción 2 HD (CDN)', url: 'https://pirlotv.la/eventoshd.php?r=aHR0cHM6Ly9jZHBsYXkubGl2ZS90ZWxlbXVuZG8ucGhw', isHD: true }
     ]}
   ];
 
@@ -755,9 +902,21 @@ app.get('/api/resolve', async (req, res) => {
 
   try {
     const result = await resolveStreamWithCoalescing(normalized);
+    if (!result || !result.ok) {
+      return res.status(502).json({
+        ok: false,
+        error: result?.error || 'No se pudo resolver el flujo de video en los orígenes disponibles',
+        targetUrl: normalized
+      });
+    }
     res.json(result);
   } catch (err) {
-    res.status(500).json({ ok: false, error: err.message });
+    res.status(502).json({
+      ok: false,
+      error: 'Error al contactar los proveedores de streaming',
+      message: err.message,
+      targetUrl: normalized
+    });
   }
 });
 
@@ -788,7 +947,7 @@ app.post('/api/probe-fastest', async (req, res) => {
       if (resolved.mode === 'hls' && resolved.streamUrls && resolved.streamUrls.length > 0) {
         const testTarget = resolved.streamUrls[0];
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 3500);
+        const timeoutId = setTimeout(() => controller.abort(), 12000);
         const probeStart = performance.now();
 
         try {
@@ -804,7 +963,7 @@ app.post('/api/probe-fastest', async (req, res) => {
           });
           clearTimeout(timeoutId);
 
-          // Cancel body immediately after reading headers so probe takes < 500ms
+          // Cancel body immediately after reading headers so probe takes minimal resources
           testRes.body?.cancel().catch(() => {});
 
           const latencyMs = Math.round(performance.now() - probeStart);
@@ -832,7 +991,7 @@ app.post('/api/probe-fastest', async (req, res) => {
       } else if (resolved.mode === 'embed' && resolved.rawEmbedUrl) {
         // Probe embed player availability
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 3000);
+        const timeoutId = setTimeout(() => controller.abort(), 12000);
         const probeStart = performance.now();
         try {
           const testRes = await fetch(resolved.rawEmbedUrl, {
@@ -934,42 +1093,52 @@ app.get('/api/stream/m3u8', async (req, res) => {
   const referer = req.query.referer || 'https://xstream.st/';
 
   if (!targetUrl) {
-    return res.status(400).send('Parámetro url faltante');
+    return res.status(400).json({ ok: false, error: 'Parámetro url faltante' });
   }
 
   const safety = isSafeExternalUrl(targetUrl);
   if (!safety.safe) {
-    return res.status(403).send(`Acceso denegado: ${safety.reason}`);
+    return res.status(403).json({ ok: false, error: `Acceso denegado: ${safety.reason}` });
   }
 
   const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 12000);
   const onClose = () => controller.abort();
   req.on('close', onClose);
 
   try {
-    let originHeader = 'https://xstream.st';
-    try {
-      originHeader = new URL(referer).origin;
-    } catch (e) {}
+    const upstreamHeaders = getLegitimateHeaders(targetUrl, referer);
+    const sessionCookie = getCookiesForUrl(targetUrl, req.query.cookie);
+    if (sessionCookie) {
+      upstreamHeaders['Cookie'] = sessionCookie;
+    }
 
     const response = await fetch(targetUrl, {
-      headers: {
-        'User-Agent': USER_AGENT,
-        'Referer': referer,
-        'Origin': originHeader,
-        'Connection': 'keep-alive'
-      },
+      headers: upstreamHeaders,
       redirect: 'follow',
       signal: controller.signal
     });
 
+    clearTimeout(timeoutId);
+
+    const setCookie = response.headers.get('set-cookie');
+    if (setCookie) {
+      saveCookiesForUrl(response.url || targetUrl, setCookie);
+    }
+
     if (!response.ok) {
-      return res.status(response.status).send(`Fallo al obtener m3u8: ${response.statusText}`);
+      return res.status(502).json({
+        ok: false,
+        error: `Fallo al obtener manifiesto HLS del origen (${response.status} ${response.statusText})`,
+        status: response.status,
+        targetUrl
+      });
     }
 
     const playlist = await response.text();
     // Use effectiveUrl (final URL after any redirects) to resolve relative paths safely
     const effectiveUrl = response.url || targetUrl;
+    const effectiveCookie = getCookiesForUrl(effectiveUrl, sessionCookie);
 
     const lines = playlist.split('\n');
     const rewritten = lines.map(line => {
@@ -983,7 +1152,11 @@ app.get('/api/stream/m3u8', async (req, res) => {
           try {
             absUri = new URL(uri, effectiveUrl).href;
           } catch (e) {}
-          return `URI="/api/stream/ts?url=${encodeURIComponent(absUri)}&referer=${encodeURIComponent(referer)}"`;
+          let proxiedKey = `/api/stream/ts?url=${encodeURIComponent(absUri)}&referer=${encodeURIComponent(effectiveUrl)}`;
+          if (effectiveCookie) {
+            proxiedKey += `&cookie=${encodeURIComponent(effectiveCookie)}`;
+          }
+          return `URI="${proxiedKey}"`;
         });
       }
 
@@ -995,7 +1168,11 @@ app.get('/api/stream/m3u8', async (req, res) => {
 
       const isSubPlaylist = absoluteTarget.includes('.m3u8');
       const endpoint = isSubPlaylist ? '/api/stream/m3u8' : '/api/stream/ts';
-      return `${endpoint}?url=${encodeURIComponent(absoluteTarget)}&referer=${encodeURIComponent(referer)}`;
+      let proxiedLine = `${endpoint}?url=${encodeURIComponent(absoluteTarget)}&referer=${encodeURIComponent(effectiveUrl)}`;
+      if (effectiveCookie) {
+        proxiedLine += `&cookie=${encodeURIComponent(effectiveCookie)}`;
+      }
+      return proxiedLine;
     }).join('\n');
 
     res.setHeader('Content-Type', 'application/vnd.apple.mpegurl; charset=utf-8');
@@ -1005,12 +1182,19 @@ app.get('/api/stream/m3u8', async (req, res) => {
     res.setHeader('Keep-Alive', 'timeout=30, max=1000');
     res.send(rewritten);
   } catch (err) {
+    clearTimeout(timeoutId);
     if (err.name === 'AbortError') return;
-    console.error('M3U8 proxy error:', err.message);
+    console.error('[M3U8 Proxy Error]:', err.message);
     if (!res.headersSent) {
-      res.status(502).send('Error proxying m3u8: ' + err.message);
+      res.status(502).json({
+        ok: false,
+        error: 'Error de conexión con el proveedor de video (M3U8)',
+        message: err.message,
+        targetUrl
+      });
     }
   } finally {
+    clearTimeout(timeoutId);
     req.off('close', onClose);
   }
 });
@@ -1023,30 +1207,25 @@ app.get('/api/stream/ts', async (req, res) => {
   const referer = req.query.referer || 'https://xstream.st/';
 
   if (!targetUrl) {
-    return res.status(400).send('Parámetro url faltante');
+    return res.status(400).json({ ok: false, error: 'Parámetro url faltante' });
   }
 
   const safety = isSafeExternalUrl(targetUrl);
   if (!safety.safe) {
-    return res.status(403).send(`Acceso denegado: ${safety.reason}`);
+    return res.status(403).json({ ok: false, error: `Acceso denegado: ${safety.reason}` });
   }
 
   const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 12000);
   const onClose = () => controller.abort();
   req.on('close', onClose);
 
   try {
-    let originHeader = 'https://xstream.st';
-    try {
-      originHeader = new URL(referer).origin;
-    } catch (e) {}
-
-    const upstreamHeaders = {
-      'User-Agent': USER_AGENT,
-      'Referer': referer,
-      'Origin': originHeader,
-      'Connection': 'keep-alive'
-    };
+    const upstreamHeaders = getLegitimateHeaders(targetUrl, referer);
+    const sessionCookie = getCookiesForUrl(targetUrl, req.query.cookie);
+    if (sessionCookie) {
+      upstreamHeaders['Cookie'] = sessionCookie;
+    }
 
     if (req.headers.range) {
       upstreamHeaders['Range'] = req.headers.range;
@@ -1058,8 +1237,20 @@ app.get('/api/stream/ts', async (req, res) => {
       signal: controller.signal
     });
 
+    clearTimeout(timeoutId);
+
+    const setCookie = response.headers.get('set-cookie');
+    if (setCookie) {
+      saveCookiesForUrl(response.url || targetUrl, setCookie);
+    }
+
     if (!response.ok && response.status !== 206) {
-      return res.status(response.status).send('Fallo al obtener segmento');
+      return res.status(502).json({
+        ok: false,
+        error: `Fallo al obtener fragmento de video del origen (${response.status} ${response.statusText})`,
+        status: response.status,
+        targetUrl
+      });
     }
 
     let contentType = 'video/mp2t';
@@ -1089,20 +1280,34 @@ app.get('/api/stream/ts', async (req, res) => {
     // Zero-RAM streaming via Readable.fromWeb
     if (response.body) {
       const nodeStream = Readable.fromWeb(response.body);
-      nodeStream.on('error', () => {
-        if (!res.headersSent) res.status(502).end();
+      nodeStream.on('error', (err) => {
+        if (!res.headersSent) {
+          res.status(502).json({
+            ok: false,
+            error: 'Error en flujo de fragmento de video',
+            message: err.message,
+            targetUrl
+          });
+        }
       });
       nodeStream.pipe(res);
     } else {
       res.end();
     }
   } catch (err) {
+    clearTimeout(timeoutId);
     if (err.name === 'AbortError') return;
-    console.error('Video segment streaming error:', err.message);
+    console.error('[Video Segment Streaming Error]:', err.message);
     if (!res.headersSent) {
-      res.status(502).send('Error streaming video segment: ' + err.message);
+      res.status(502).json({
+        ok: false,
+        error: 'Error streaming video segment',
+        message: err.message,
+        targetUrl
+      });
     }
   } finally {
+    clearTimeout(timeoutId);
     req.off('close', onClose);
   }
 });

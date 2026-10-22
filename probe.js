@@ -26,7 +26,11 @@ function normalizeSourceUrl(rawUrl, base = 'https://pirlotv.la/') {
       const decodedParam = decodeURIComponent(b64Match[1]);
       const targetFromB64 = Buffer.from(decodedParam, 'base64').toString('utf8');
       if (targetFromB64 && targetFromB64.startsWith('http')) {
-        return targetFromB64;
+        let clean = targetFromB64;
+        if (clean.includes('playvi.org')) {
+          clean = clean.replace('playvi.org', 'cdplay.live');
+        }
+        return clean;
       }
     } catch (e) {}
   }
@@ -38,7 +42,7 @@ function normalizeSourceUrl(rawUrl, base = 'https://pirlotv.la/') {
   }
 }
 
-async function safeFetchWithTimeout(url, headers = {}, timeoutMs = 8000) {
+async function safeFetchWithTimeout(url, headers = {}, timeoutMs = 12000) {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
   try {
@@ -135,7 +139,7 @@ async function resolveStream(startUrl) {
   for (let depth = 0; depth < 5; depth++) {
     lastEmbed = currentUrl;
     try {
-      const res = await safeFetchWithTimeout(currentUrl, { Referer: referer }, 8000);
+      const res = await safeFetchWithTimeout(currentUrl, { Referer: referer }, 12000);
       if (!res.ok) {
         console.log(`[Depth ${depth}] HTTP ${res.status} para ${currentUrl}`);
         break;
