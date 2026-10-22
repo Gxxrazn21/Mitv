@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">MiTV</string>
+    <string name="title_activity_main">MiTV</string>
+    <string name="package_name">com.mitv.app</string>
+    <string name="custom_url_scheme">com.mitv.app</string>
+</resources>

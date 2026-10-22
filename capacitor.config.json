@@ -1,0 +1,20 @@
+{
+  "appId": "com.mitv.app",
+  "appName": "MiTV",
+  "webDir": "public",
+  "server": {
+    "url": "https://mitvapp.duckdns.org",
+    "cleartext": true,
+    "allowNavigation": [
+      "mitvapp.duckdns.org",
+      "*.duckdns.org",
+      "pirlotv.la",
+      "*.pirlotv.la",
+      "*"
+    ]
+  },
+  "android": {
+    "allowMixedContent": true,
+    "webContentsDebuggingEnabled": false
+  }
+}

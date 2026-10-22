@@ -18,4 +18,13 @@ tmp/
 temp/
 .temp/
 dist/
+.gradle/
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties
+android/capacitor-cordova-android-plugins/build/
+*.apk
+
+
 
