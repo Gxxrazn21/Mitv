@@ -1007,7 +1007,9 @@ async function resolveStream(startUrl) {
           'Origin': new URL(referer).origin
         }
       });
-      if (!res.ok) break;
+      if (!res.ok) {
+        return { ok: false, error: `El proveedor del reproductor respondió HTTP ${res.status}`, upstreamStatus: res.status };
+      }
       const html = await res.text();
 
       // Check for direct .m3u8 stream manifests
@@ -1031,8 +1033,15 @@ async function resolveStream(startUrl) {
       referer = currentUrl;
       currentUrl = nextIframe;
     } catch (e) {
-      console.warn(`[Resolver Hop ${hop} Error]:`, e.message);
-      break;
+      const code = e.cause?.code || e.code || e.name;
+      console.warn(`[Resolver Hop ${hop} Error]:`, code, e.message);
+      return {
+        ok: false,
+        error: code === 'CERT_HAS_EXPIRED'
+          ? 'El certificado HTTPS del proveedor del reproductor está vencido. El proveedor debe renovarlo.'
+          : `No se pudo conectar al proveedor del reproductor (${code})`,
+        code
+      };
     }
   }
 
