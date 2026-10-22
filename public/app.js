@@ -592,7 +592,13 @@ async function loadStreamInSlot(slotIdx, matchData, optionIndex = 0) {
   setFocusedSlot(slotIdx);
 
   try {
-    const resolveRes = await fetch(`/api/resolve?url=${encodeURIComponent(option.url)}`, {
+    // Provide alternative options to backend for transparent failover
+    const candidateFallbacks = (matchData.options || [])
+      .filter((_, idx) => idx !== optionIndex)
+      .map(o => ({ name: o.name, url: o.url }));
+
+    const resolveQuery = `/api/resolve?url=${encodeURIComponent(option.url)}&fallbacks=${encodeURIComponent(JSON.stringify(candidateFallbacks))}`;
+    const resolveRes = await fetch(resolveQuery, {
       signal: controller.signal
     });
     const result = await resolveRes.json();
@@ -601,6 +607,19 @@ async function loadStreamInSlot(slotIdx, matchData, optionIndex = 0) {
 
     if (!result.ok) {
       throw new Error(result.error || 'No se pudo resolver el stream');
+    }
+
+    // Check if the backend rescued the channel using an alternative option
+    if (result.fallbackUsed && result.rescuedOption) {
+      console.log(`[Failover Rescatado] El servidor activó automáticamente el respaldo: ${result.rescuedOption}`);
+      const rescuedIdx = matchData.options.findIndex(o => o.name === result.rescuedOption);
+      if (rescuedIdx !== -1) {
+        slot.currentOptionIdx = rescuedIdx;
+      }
+      slot.titleEl.textContent = `${slotIdx + 1}. ${matchData.title || matchData.name} (${result.rescuedOption} - Respaldo)`;
+      if (focusedSlotIdx === slotIdx) {
+        renderStageFooterServerChips();
+      }
     }
 
     if (result.mode === 'hls' && result.streamUrls && result.streamUrls.length > 0) {
@@ -681,27 +700,32 @@ function setupSlotHls(slot, streamUrl, referer) {
         switch (data.type) {
           case Hls.ErrorTypes.NETWORK_ERROR:
             slot.networkRetryCount = (slot.networkRetryCount || 0) + 1;
-            if (slot.networkRetryCount <= 3) {
-              const backoffMs = Math.min(slot.networkRetryCount * 1000, 3000);
-              console.log(`[HLS] Recuperando micro-corte de red en ranura ${slot.index + 1} (intento ${slot.networkRetryCount}/3 en ${backoffMs}ms)...`);
-              setTimeout(() => {
-                if (slot.hlsInstance === hls && slot.mode === 'hls') {
-                  hls.startLoad();
-                }
-              }, backoffMs);
-            } else {
+            const httpCode = data.response?.code;
+            // If upstream CDN blocked (403/502) or repeated retries failed, failover immediately to next option
+            if (httpCode === 403 || httpCode === 502 || slot.networkRetryCount > 2) {
               slot.networkRetryCount = 0;
-              console.warn(`[HLS] Caída persistente de red en ranura ${slot.index + 1}, re-sintonizando opción...`);
+              console.warn(`[HLS] Bloqueo o caída de upstream (${httpCode || 'Red'}) en ranura ${slot.index + 1}. Alternando a opción de respaldo...`);
               hls.destroy();
               slot.hlsInstance = null;
-              if (slot.currentMatch && slot.currentOptionIdx + 1 < slot.currentMatch.options.length) {
+              if (slot.currentMatch && slot.currentMatch.options && slot.currentOptionIdx + 1 < slot.currentMatch.options.length) {
                 loadStreamInSlot(slot.index, slot.currentMatch, slot.currentOptionIdx + 1);
+              } else if (slot.currentMatch && slot.currentMatch.options && slot.currentMatch.options.length > 1 && slot.currentOptionIdx > 0) {
+                loadStreamInSlot(slot.index, slot.currentMatch, 0);
               } else {
                 slot.loaderEl.style.display = 'none';
                 slot.errorText.textContent = 'Canal no disponible actualmente';
                 slot.errorEl.style.display = 'flex';
               }
+              return;
             }
+
+            const backoffMs = Math.min(slot.networkRetryCount * 1000, 3000);
+            console.log(`[HLS] Recuperando micro-corte de red en ranura ${slot.index + 1} (intento ${slot.networkRetryCount}/2 en ${backoffMs}ms)...`);
+            setTimeout(() => {
+              if (slot.hlsInstance === hls && slot.mode === 'hls') {
+                hls.startLoad();
+              }
+            }, backoffMs);
             break;
 
           case Hls.ErrorTypes.MEDIA_ERROR:

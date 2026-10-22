@@ -130,7 +130,65 @@ function normalizeSourceUrl(rawUrl, base = 'https://pirlotv.la/') {
   }
 }
 
-// Lightweight cookie store for CDN edge sessions (Host -> Cookie string)
+// --------------------------------------------------------------------------
+// 2. Intelligent Device Profiles & Browser Fingerprint Rotation
+// --------------------------------------------------------------------------
+const USER_AGENT_PROFILES = [
+  {
+    ua: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
+    secChUa: '"Not/A)Brand";v="8", "Chromium";v="126", "Google Chrome";v="126"',
+    platform: '"Windows"',
+    mobile: '?0'
+  },
+  {
+    ua: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+    secChUa: '"Chromium";v="124", "Google Chrome";v="124", "Not-A.Brand";v="99"',
+    platform: '"Windows"',
+    mobile: '?0'
+  },
+  {
+    ua: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
+    secChUa: '"Not/A)Brand";v="8", "Chromium";v="126", "Google Chrome";v="126"',
+    platform: '"macOS"',
+    mobile: '?0'
+  },
+  {
+    ua: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 14_5) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Safari/605.1.15',
+    secChUa: null,
+    platform: '"macOS"',
+    mobile: '?0'
+  },
+  {
+    ua: 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1',
+    secChUa: null,
+    platform: '"iOS"',
+    mobile: '?1'
+  },
+  {
+    ua: 'Mozilla/5.0 (Linux; Android 14; Pixel 8 Pro) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.6478.122 Mobile Safari/537.36',
+    secChUa: '"Not/A)Brand";v="8", "Chromium";v="126", "Google Chrome";v="126"',
+    platform: '"Android"',
+    mobile: '?1'
+  }
+];
+
+function getBrowserProfile(seedKey = null) {
+  if (seedKey && typeof seedKey === 'string') {
+    let hash = 0;
+    for (let i = 0; i < seedKey.length; i++) {
+      hash = (hash << 5) - hash + seedKey.charCodeAt(i);
+      hash |= 0;
+    }
+    const idx = Math.abs(hash) % USER_AGENT_PROFILES.length;
+    return USER_AGENT_PROFILES[idx];
+  }
+  const randomIdx = Math.floor(Math.random() * USER_AGENT_PROFILES.length);
+  return USER_AGENT_PROFILES[randomIdx];
+}
+
+// --------------------------------------------------------------------------
+// 3. Dynamic Token & Cookie Store for Ephemeral Sessions
+// --------------------------------------------------------------------------
 const streamCookieStore = new Map();
 
 function saveCookiesForUrl(url, setCookieHeader) {
@@ -148,7 +206,7 @@ function saveCookiesForUrl(url, setCookieHeader) {
       const existing = streamCookieStore.get(domain) || '';
       const merged = existing ? `${existing}; ${pairs}` : pairs;
       streamCookieStore.set(domain, merged);
-      if (streamCookieStore.size > 200) {
+      if (streamCookieStore.size > 250) {
         const firstKey = streamCookieStore.keys().next().value;
         streamCookieStore.delete(firstKey);
       }
@@ -164,6 +222,146 @@ function getCookiesForUrl(url, explicitCookie = null) {
   } catch (e) {
     return '';
   }
+}
+
+// Pre-emptive session warmer: hits player / embed page to capture dynamic cookies & tokens
+async function warmupSession(refererUrl, streamUrl = null, force = false) {
+  if (!refererUrl || refererUrl.includes('localhost') || refererUrl.includes('127.0.0.1')) {
+    return;
+  }
+  try {
+    let refererDomain = null;
+    try {
+      refererDomain = new URL(refererUrl).hostname;
+    } catch (e) {}
+
+    let streamDomain = null;
+    if (streamUrl) {
+      try {
+        streamDomain = new URL(streamUrl).hostname;
+      } catch (e) {}
+    }
+
+    if (!force) {
+      const hasRefererCookie = refererDomain ? streamCookieStore.has(refererDomain) : false;
+      const hasStreamCookie = streamDomain ? streamCookieStore.has(streamDomain) : false;
+      if (hasRefererCookie && (!streamDomain || hasStreamCookie)) {
+        return;
+      }
+    }
+
+    const profile = getBrowserProfile(refererUrl);
+    const warmupCtrl = new AbortController();
+    const wId = setTimeout(() => warmupCtrl.abort(), 6000);
+
+    const res = await fetch(refererUrl, {
+      method: 'GET',
+      headers: {
+        'User-Agent': profile.ua,
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+        'Accept-Language': 'es-ES,es;q=0.9,en;q=0.8',
+        'Cache-Control': 'no-cache',
+        'Pragma': 'no-cache',
+        'Referer': 'https://pirlotv.la/',
+        'Origin': 'https://pirlotv.la',
+        'Sec-Fetch-Dest': 'document',
+        'Sec-Fetch-Mode': 'navigate',
+        'Sec-Fetch-Site': 'cross-site'
+      },
+      redirect: 'follow',
+      signal: warmupCtrl.signal
+    });
+    clearTimeout(wId);
+
+    const setCookie = res.headers.get('set-cookie');
+    if (setCookie) {
+      saveCookiesForUrl(res.url || refererUrl, setCookie);
+      if (streamUrl) {
+        saveCookiesForUrl(streamUrl, setCookie);
+      }
+      if (refererDomain && streamDomain) {
+        const refCookies = streamCookieStore.get(refererDomain);
+        if (refCookies) {
+          const streamCookies = streamCookieStore.get(streamDomain);
+          streamCookieStore.set(streamDomain, streamCookies ? `${streamCookies}; ${refCookies}` : refCookies);
+        }
+      }
+    }
+  } catch (e) {
+    // Non-blocking warmup
+  }
+}
+
+// --------------------------------------------------------------------------
+// 4. In-Memory HLS Manifest Cache (Sliding Window TTL: 7s)
+// Prevents cloud IP rate-limiting (429/403) from multiple slots or frequent polls
+// --------------------------------------------------------------------------
+const m3u8Cache = new Map();
+const M3U8_CACHE_TTL = 7000;
+
+function getCachedM3u8(targetUrl) {
+  const item = m3u8Cache.get(targetUrl);
+  if (!item) return null;
+  if (Date.now() - item.timestamp > M3U8_CACHE_TTL) {
+    m3u8Cache.delete(targetUrl);
+    return null;
+  }
+  return item.content;
+}
+
+function setCachedM3u8(targetUrl, content) {
+  m3u8Cache.set(targetUrl, {
+    timestamp: Date.now(),
+    content
+  });
+  if (m3u8Cache.size > 200) {
+    const now = Date.now();
+    for (const [key, val] of m3u8Cache.entries()) {
+      if (now - val.timestamp > M3U8_CACHE_TTL) {
+        m3u8Cache.delete(key);
+      }
+    }
+  }
+}
+
+// --------------------------------------------------------------------------
+// 5. Automatic Failover Finder for Channel Options
+// --------------------------------------------------------------------------
+function findAlternativeOptionsForUrl(targetUrl, explicitFallbacks = []) {
+  const norm = normalizeSourceUrl(targetUrl, 'https://pirlotv.la/');
+  const candidateUrls = [];
+
+  // 1. Add explicit fallbacks passed by client
+  if (Array.isArray(explicitFallbacks)) {
+    for (const fb of explicitFallbacks) {
+      const fbUrl = typeof fb === 'string' ? fb : fb?.url;
+      const fbNorm = normalizeSourceUrl(fbUrl, 'https://pirlotv.la/');
+      if (fbNorm && fbNorm !== norm && !candidateUrls.some(c => c.url === fbNorm)) {
+        candidateUrls.push({ url: fbNorm, name: fb?.name || 'Opción Alternativa' });
+      }
+    }
+  }
+
+  // 2. Search catalog in cache
+  const allEvents = [...(cache.matches || []), ...(cache.channels || [])];
+  for (const item of allEvents) {
+    if (item.options && Array.isArray(item.options)) {
+      const matchIdx = item.options.findIndex(o => normalizeSourceUrl(o.url, 'https://pirlotv.la/') === norm || o.url === targetUrl);
+      if (matchIdx !== -1) {
+        for (let i = 0; i < item.options.length; i++) {
+          if (i !== matchIdx) {
+            const optNorm = normalizeSourceUrl(item.options[i].url, 'https://pirlotv.la/');
+            if (optNorm && optNorm !== norm && !candidateUrls.some(c => c.url === optNorm)) {
+              candidateUrls.push({ url: optNorm, name: item.options[i].name });
+            }
+          }
+        }
+        break;
+      }
+    }
+  }
+
+  return candidateUrls;
 }
 
 function getLegitimateHeaders(targetUrl, incomingReferer = null, customHeaders = {}) {
@@ -201,23 +399,30 @@ function getLegitimateHeaders(targetUrl, incomingReferer = null, customHeaders =
     if (targetObj) effectiveOrigin = targetObj.origin;
   }
 
-  return {
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+  const profile = getBrowserProfile(targetUrl);
+
+  const headers = {
+    'User-Agent': profile.ua,
     'Accept': '*/*',
     'Accept-Language': 'es-ES,es;q=0.9,en;q=0.8',
     'Cache-Control': 'no-cache',
     'Pragma': 'no-cache',
-    'Sec-Ch-Ua': '"Chromium";v="124", "Google Chrome";v="124", "Not-A.Brand";v="99"',
-    'Sec-Ch-Ua-Mobile': '?0',
-    'Sec-Ch-Ua-Platform': '"Windows"',
-    'Sec-Fetch-Dest': 'empty',
-    'Sec-Fetch-Mode': 'cors',
-    'Sec-Fetch-Site': 'cross-site',
     'Referer': effectiveReferer,
     'Origin': effectiveOrigin,
     'Connection': 'keep-alive',
     ...customHeaders
   };
+
+  if (profile.secChUa) {
+    headers['Sec-Ch-Ua'] = profile.secChUa;
+    headers['Sec-Ch-Ua-Mobile'] = profile.mobile;
+    headers['Sec-Ch-Ua-Platform'] = profile.platform;
+    headers['Sec-Fetch-Dest'] = 'empty';
+    headers['Sec-Fetch-Mode'] = 'cors';
+    headers['Sec-Fetch-Site'] = 'cross-site';
+  }
+
+  return headers;
 }
 
 async function safeFetch(url, options = {}, timeoutMs = 12000) {
@@ -808,6 +1013,7 @@ async function resolveStream(startUrl) {
       // Check for direct .m3u8 stream manifests
       const streams = extractStreamsFromHtml(html);
       if (streams.length > 0) {
+        warmupSession(currentUrl, streams[0]).catch(() => {});
         return {
           ok: true,
           mode: 'hls',
@@ -914,7 +1120,7 @@ app.get('/api/refresh', async (req, res) => {
   });
 });
 
-// Stream resolver with In-Flight Coalescing (Prevents duplicate parallel scrapers)
+// Stream resolver with In-Flight Coalescing & Intelligent Failover across Channel Options
 app.get('/api/resolve', async (req, res) => {
   const url = req.query.url;
   if (!url) {
@@ -931,17 +1137,69 @@ app.get('/api/resolve', async (req, res) => {
     return res.status(403).json({ ok: false, error: safety.reason });
   }
 
-  try {
-    const result = await resolveStreamWithCoalescing(normalized);
-    if (!result || !result.ok) {
-      return res.status(502).json({
-        ok: false,
-        error: result?.error || 'No se pudo resolver el flujo de video en los orígenes disponibles',
-        targetUrl: normalized
-      });
+  let explicitFallbacks = [];
+  if (req.query.fallbacks) {
+    try {
+      explicitFallbacks = JSON.parse(req.query.fallbacks);
+    } catch (e) {
+      if (typeof req.query.fallbacks === 'string') {
+        explicitFallbacks = req.query.fallbacks.split(',').map(u => ({ url: u.trim() }));
+      }
     }
-    res.json(result);
+  }
+
+  try {
+    let result = await resolveStreamWithCoalescing(normalized);
+
+    // If primary option resolved successfully, return it
+    if (result && result.ok) {
+      return res.json(result);
+    }
+
+    // PRIMARY OPTION FAILED (403, 502, or no signal) -> AUTOMATIC FAILOVER
+    console.warn(`[Auto-Failover] Opción primaria falló para ${normalized}. Buscando opciones alternativas...`);
+    const alternatives = findAlternativeOptionsForUrl(normalized, explicitFallbacks);
+
+    for (const alt of alternatives) {
+      try {
+        console.log(`[Auto-Failover] Probando opción de respaldo: ${alt.name} (${alt.url})`);
+        const altResult = await resolveStreamWithCoalescing(alt.url);
+        if (altResult && altResult.ok) {
+          console.log(`[Auto-Failover] ¡Éxito! Canal rescatado con opción de respaldo: ${alt.name}`);
+          return res.json({
+            ...altResult,
+            fallbackUsed: true,
+            rescuedOption: alt.name,
+            originalUrl: normalized
+          });
+        }
+      } catch (altErr) {
+        console.warn(`[Auto-Failover] Falló respaldo ${alt.name}:`, altErr.message);
+      }
+    }
+
+    return res.status(502).json({
+      ok: false,
+      error: result?.error || 'No se pudo resolver ninguna opción de streaming disponible para este canal',
+      targetUrl: normalized
+    });
   } catch (err) {
+    // Attempt failover even if primary resolution threw an exception
+    const alternatives = findAlternativeOptionsForUrl(normalized, explicitFallbacks);
+    for (const alt of alternatives) {
+      try {
+        const altResult = await resolveStreamWithCoalescing(alt.url);
+        if (altResult && altResult.ok) {
+          return res.json({
+            ...altResult,
+            fallbackUsed: true,
+            rescuedOption: alt.name,
+            originalUrl: normalized
+          });
+        }
+      } catch (altErr) {}
+    }
+
     res.status(502).json({
       ok: false,
       error: 'Error al contactar los proveedores de streaming',
@@ -1132,14 +1390,31 @@ app.get('/api/stream/m3u8', async (req, res) => {
     return res.status(403).json({ ok: false, error: `Acceso denegado: ${safety.reason}` });
   }
 
+  // 1. In-Memory HLS Manifest Cache (Sliding Window TTL: 7s)
+  // Eliminates rate limiting (429/403) from multiple screen players and frequent poll loops
+  const cachedManifest = getCachedM3u8(targetUrl);
+  if (cachedManifest) {
+    res.setHeader('Content-Type', 'application/vnd.apple.mpegurl; charset=utf-8');
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Headers', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
+    res.setHeader('Cache-Control', 'public, max-age=5');
+    res.setHeader('X-Cache-Status', 'HIT');
+    res.setHeader('Connection', 'keep-alive');
+    return res.send(cachedManifest);
+  }
+
+  // 2. Pre-emptive session warmer: captures cookies & dynamic CDN tokens before requesting playlist
+  await warmupSession(referer, targetUrl);
+
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 12000);
   const onClose = () => controller.abort();
   req.on('close', onClose);
 
   try {
-    const upstreamHeaders = getLegitimateHeaders(targetUrl, referer);
-    const sessionCookie = getCookiesForUrl(targetUrl, req.query.cookie);
+    let upstreamHeaders = getLegitimateHeaders(targetUrl, referer);
+    let sessionCookie = getCookiesForUrl(targetUrl, req.query.cookie);
     if (sessionCookie) {
       upstreamHeaders['Cookie'] = sessionCookie;
     }
@@ -1153,7 +1428,12 @@ app.get('/api/stream/m3u8', async (req, res) => {
     // Permissive fallback retry if upstream blocks with 403, 502 or 503
     if (!response.ok && (response.status === 403 || response.status === 502 || response.status === 503)) {
       try {
+        await warmupSession(referer, targetUrl, true);
+        const refreshedCookie = getCookiesForUrl(targetUrl);
         const altHeaders = { ...upstreamHeaders };
+        if (refreshedCookie) {
+          altHeaders['Cookie'] = refreshedCookie;
+        }
         if (upstreamHeaders['Referer'] !== 'https://pirlotv.la/') {
           altHeaders['Referer'] = 'https://pirlotv.la/';
           altHeaders['Origin'] = 'https://pirlotv.la';
@@ -1232,11 +1512,15 @@ app.get('/api/stream/m3u8', async (req, res) => {
       return proxiedLine;
     }).join('\n');
 
+    // Save rewritten manifest to in-memory sliding cache
+    setCachedM3u8(targetUrl, rewritten);
+
     res.setHeader('Content-Type', 'application/vnd.apple.mpegurl; charset=utf-8');
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Headers', '*');
     res.setHeader('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
-    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    res.setHeader('Cache-Control', 'public, max-age=5');
+    res.setHeader('X-Cache-Status', 'MISS');
     res.setHeader('Connection', 'keep-alive');
     res.setHeader('Keep-Alive', 'timeout=30, max=1000');
     res.send(rewritten);
@@ -1277,14 +1561,17 @@ app.get('/api/stream/ts', async (req, res) => {
     return res.status(403).json({ ok: false, error: `Acceso denegado: ${safety.reason}` });
   }
 
+  // Ensure cookies exist for target stream domain before requesting segment
+  await warmupSession(referer, targetUrl);
+
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 12000);
+  const timeoutId = setTimeout(() => controller.abort(), 14000);
   const onClose = () => controller.abort();
   req.on('close', onClose);
 
   try {
-    const upstreamHeaders = getLegitimateHeaders(targetUrl, referer);
-    const sessionCookie = getCookiesForUrl(targetUrl, req.query.cookie);
+    let upstreamHeaders = getLegitimateHeaders(targetUrl, referer);
+    let sessionCookie = getCookiesForUrl(targetUrl, req.query.cookie);
     if (sessionCookie) {
       upstreamHeaders['Cookie'] = sessionCookie;
     }
@@ -1302,7 +1589,12 @@ app.get('/api/stream/ts', async (req, res) => {
     // Permissive fallback retry if upstream blocks with 403, 502 or 503
     if (!response.ok && response.status !== 206 && (response.status === 403 || response.status === 502 || response.status === 503)) {
       try {
+        await warmupSession(referer, targetUrl, true);
+        const refreshedCookie = getCookiesForUrl(targetUrl);
         const altHeaders = { ...upstreamHeaders };
+        if (refreshedCookie) {
+          altHeaders['Cookie'] = refreshedCookie;
+        }
         if (upstreamHeaders['Referer'] !== 'https://pirlotv.la/') {
           altHeaders['Referer'] = 'https://pirlotv.la/';
           altHeaders['Origin'] = 'https://pirlotv.la';
