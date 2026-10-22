@@ -9,7 +9,7 @@ function context(extra = {}) {
   const timers = new Map();
   let id = 0;
   const ctx = vm.createContext({
-    document: { addEventListener() {}, documentElement: { classList: { toggle() {} } } },
+    document: { readyState: 'loading', addEventListener() {}, documentElement: { classList: { toggle() {} } } },
     window: { addEventListener() {} }, location: { search: '?tv=1' }, navigator: { userAgent: 'AFT' },
     URLSearchParams, console, AbortController,
     setTimeout: fn => { timers.set(++id, fn); return id; }, clearTimeout: n => timers.delete(n),
@@ -23,7 +23,7 @@ test('TV channel Up/Down moves one row, scrolls locally and never activates play
   const callbacks = [], handlers = {};
   const list = { scrollTop:80, parentElement:null, getBoundingClientRect:() => ({top:0,bottom:80,left:0,right:200}) };
   const doc = {
-    body:{}, documentElement:{classList:{toggle(){}}},
+    readyState:'loading', body:{}, documentElement:{classList:{toggle(){}}},
     addEventListener:(name, fn) => name === 'DOMContentLoaded' ? callbacks.push(fn) : handlers[name] = fn,
     getElementById:() => ({style:{display:'none'}}), querySelector:() => null
   };
@@ -52,7 +52,7 @@ test('mobile and desktop do not register the TV keyboard handler or enable TV op
     const callbacks = [], events = [];
     const {run} = context({
       location:{search:''}, navigator:{userAgent},
-      document:{documentElement:{classList:{toggle(){}}}, addEventListener:(name,fn) => {events.push(name); if(name === 'DOMContentLoaded') callbacks.push(fn);}}
+      document:{readyState:'loading',documentElement:{classList:{toggle(){}}}, addEventListener:(name,fn) => {events.push(name); if(name === 'DOMContentLoaded') callbacks.push(fn);}}
     });
     callbacks[0]();
     assert.equal(run('isTV'), false);

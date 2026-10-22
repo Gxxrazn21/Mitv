@@ -74,7 +74,7 @@ function setupAudioNormalizer(videoEl) {
 // --------------------------------------------------------------------------
 // Initialization
 // --------------------------------------------------------------------------
-document.addEventListener('DOMContentLoaded', async () => {
+async function initializeMiTV() {
   initSlots();
   setupUIEventListeners();
   setupKeyboardShortcuts();
@@ -86,6 +86,8 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
   setupVolumeControls();
   registerServiceWorkerSafely();
+  window.mitvClientReady = true;
+  window.dispatchEvent(new Event('mitv-ready'));
 
   await Promise.all([
     fetchSchedule(),
@@ -97,7 +99,12 @@ document.addEventListener('DOMContentLoaded', async () => {
   if (allMatches.length > 0) {
     loadStreamInSlot(0, allMatches[0], 0);
   }
-});
+}
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', initializeMiTV, { once: true });
+} else {
+  Promise.resolve().then(initializeMiTV);
+}
 
 // --------------------------------------------------------------------------
 // Slots Setup
@@ -1410,7 +1417,7 @@ function registerServiceWorkerSafely() {
   const isSecure = window.isSecureContext || window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
 
   if ('serviceWorker' in navigator && isSecure) {
-    window.addEventListener('load', () => {
+    const register = () => {
       navigator.serviceWorker.register('/sw.js')
         .then((reg) => {
           console.log('[PWA] Service Worker registrado exitosamente con alcance:', reg.scope);
@@ -1418,7 +1425,9 @@ function registerServiceWorkerSafely() {
         .catch((err) => {
           console.warn('[PWA] Advertencia al registrar Service Worker:', err.message);
         });
-    });
+    };
+    if (document.readyState === 'complete') register();
+    else window.addEventListener('load', register, { once: true });
   } else {
     console.log('[PWA] Contexto HTTP o IP no seguro detectado. Service Worker desactivado para prevenir bloqueos o errores de consola.');
   }

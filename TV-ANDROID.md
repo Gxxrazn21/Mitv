@@ -2,7 +2,9 @@
 
 La navegación con control remoto se ejecuta en el frontend (`tv.js`). No necesita una API de teclas ni cambios en Express. Servir los archivos actualizados de `public/`, incluidos `tv.js`, `tv.css`, `player-entry.js` y `app-tv.js`.
 
-La versión de celular/web conserva `app.js` y `app.css` originales (anteriores a la adaptación TV). `player-entry.js` elige `app-tv.js` solo cuando está activo el modo TV; fuera de TV no se registra el controlador D-pad ni se aplican estilos de TV.
+La versión de celular/web conserva el diseño original y `app.css`. `player-entry.js` elige `app-tv.js` solo cuando está activo el modo TV; fuera de TV no se registra el controlador D-pad ni se aplican estilos de TV. Desde 8.2, ambos clientes pueden inicializarse antes o después de DOMContentLoaded sin usar document.write.
+
+La corrección móvil 8.2 añade `touch.css`: evita encadenar el desplazamiento táctil con el gesto de refrescar la página y evita comprimir las filas de listas largas. El resaltado de audio ya no reconstruye la lista móvil. Esto no controla un SwipeRefreshLayout nativo de una APK: si el contenedor captura el gesto antes de entregarlo a WebView, debe corregirse también en el proyecto Android.
 
 ## Probar localmente
 
@@ -46,6 +48,6 @@ En embeds se limita a 25 s la carga del documento. El evento `load` **no demuest
 
 Pruebas automatizadas con Node: geometría direccional, timeout y limpieza, fallback nativo sin HLS.js, recuperación limitada y autoplay con protección frente a respuestas antiguas. No sustituyen pruebas de reproducción real en hardware.
 
-Antes de distribuir: comprobar 720p, 1080p y 4K, móvil vertical/horizontal, lista larga, diálogo y retorno de foco; probar 1/2/4 pantallas, pausa prolongada, desconexión, cambio rápido de canal y cierre de ranuras. La revisión visual automatizada no estuvo disponible en esta sesión (navegador integrado no disponible). No se ha desplegado este cambio en Oracle.
+Antes de distribuir: comprobar 720p, 1080p y 4K, móvil vertical/horizontal, lista larga, diálogo y retorno de foco; probar 1/2/4 pantallas, pausa prolongada, desconexión, cambio rápido de canal y cierre de ranuras. La revisión visual automatizada no estuvo disponible en esta sesión (ningún navegador conectado). La corrección 8.2 está publicada en el contenedor Oracle y sus seis archivos se verificaron por HTTPS con SHA256. Se conservó respaldo del frontend anterior en el servidor. Es un cambio en el contenedor en ejecución: un rebuild debe incluir también estos archivos del repositorio. Hay 13 pruebas Node aprobadas; reproducción física en Fire TV y desplazamiento en el teléfono pendientes de confirmación.
 
 Referencias: [diseño Fire TV y margen seguro](https://www.developer.amazon.com/docs/fire-tv/design-and-user-experience-guidelines.html), [WebSettings de Android](https://developer.android.com/reference/android/webkit/WebSettings), [aceleración de WebView](https://chromium.googlesource.com/chromium/src/+/HEAD/android_webview/docs/software_draw_deprecated.md).

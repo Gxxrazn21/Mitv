@@ -1,5 +1,5 @@
 // MiTV Service Worker - PWA & Cache Management
-const CACHE_NAME = 'mitv-v8.1';
+const CACHE_NAME = 'mitv-v8.2';
 const STATIC_ASSETS = [
   '/',
   '/index.html',
@@ -9,6 +9,7 @@ const STATIC_ASSETS = [
   '/player-entry.js',
   '/tv.js',
   '/tv.css',
+  '/touch.css',
   '/manifest.json',
   '/icon-192.png',
   '/icon-512.png',

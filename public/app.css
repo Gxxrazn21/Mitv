@@ -35,12 +35,15 @@ html, body {
   height: 100vh;
   height: 100dvh;
   overflow: hidden;
+  overscroll-behavior: none;
+  overscroll-behavior-y: none;
   background-color: var(--bg-base);
   color: var(--text-main);
   font-family: var(--font-family);
   font-size: 13px;
   line-height: 1.4;
   -webkit-font-smoothing: antialiased;
+  -webkit-tap-highlight-color: transparent;
 }
 
 /* Custom Scrollbars */
@@ -211,6 +214,8 @@ html, body {
   width: 100vw;
   overflow: hidden;
   position: relative;
+  overscroll-behavior: none;
+  overscroll-behavior-y: none;
 }
 
 /* ==========================================================================
@@ -698,6 +703,7 @@ video::-webkit-media-controls {
   padding: 8px 10px;
   border-bottom: 1px solid var(--border-subtle);
   background: #0e0e12;
+  flex-shrink: 0;
 }
 
 .count-pill {
@@ -715,6 +721,7 @@ video::-webkit-media-controls {
   gap: 6px;
   padding: 8px 10px;
   border-bottom: 1px solid var(--border-subtle);
+  flex-shrink: 0;
 }
 .search-input-box {
   flex: 1;
@@ -773,11 +780,17 @@ video::-webkit-media-controls {
   padding: 6px 10px;
   border-bottom: 1px solid var(--border-subtle);
   overflow-x: auto;
+  touch-action: pan-x;
+  overscroll-behavior-x: contain;
+  flex-shrink: 0;
 }
 .filter-chips-scroll {
   display: flex;
   gap: 4px;
   overflow-x: auto;
+  touch-action: pan-x;
+  overscroll-behavior-x: contain;
+  -webkit-overflow-scrolling: touch;
 }
 .filter-chip {
   padding: 3px 8px;
@@ -789,6 +802,7 @@ video::-webkit-media-controls {
   cursor: pointer;
   white-space: nowrap;
   transition: all 0.15s ease;
+  touch-action: pan-x;
 }
 .filter-chip:hover {
   background: var(--bg-card-hover);
@@ -803,12 +817,22 @@ video::-webkit-media-controls {
 
 /* Sidebar List */
 .sidebar-list {
-  flex: 1;
+  flex: 1 1 0%;
+  min-height: 0;
   overflow-y: auto;
+  overflow-x: hidden;
   padding: 6px;
   display: flex;
   flex-direction: column;
   gap: 4px;
+  touch-action: pan-y;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+  overscroll-behavior-y: contain;
+  will-change: scroll-position;
+}
+.sidebar-list > * {
+  flex-shrink: 0;
 }
 
 .list-loading {
@@ -830,6 +854,15 @@ video::-webkit-media-controls {
   cursor: pointer;
   transition: background 0.15s, border-color 0.15s;
   user-select: none;
+  -webkit-user-select: none;
+  touch-action: pan-y;
+  -webkit-tap-highlight-color: transparent;
+}
+.event-card * {
+  touch-action: pan-y;
+}
+.event-card .add-multistream-btn {
+  touch-action: manipulation;
 }
 .event-card:hover {
   background: var(--bg-card-hover);
@@ -1014,6 +1047,8 @@ video::-webkit-media-controls {
     height: 100dvh;
     width: 100vw;
     overflow: hidden;
+    overscroll-behavior: none !important;
+    overscroll-behavior-y: none !important;
   }
 
   .topbar {
@@ -1022,6 +1057,7 @@ video::-webkit-media-controls {
     max-height: 44px;
     padding: 0 8px;
     gap: 6px;
+    flex-shrink: 0;
   }
 
   .topbar-left {
@@ -1043,6 +1079,9 @@ video::-webkit-media-controls {
     gap: 5px;
     flex: 1;
     justify-content: flex-start;
+    touch-action: pan-x;
+    overscroll-behavior-x: contain;
+    -webkit-overflow-scrolling: touch;
   }
   .topbar-center::-webkit-scrollbar {
     display: none;
@@ -1051,10 +1090,12 @@ video::-webkit-media-controls {
   .seg-btn {
     padding: 3px 7px;
     font-size: 11px;
+    touch-action: manipulation;
   }
   .topbar-btn {
     padding: 4px 7px;
     font-size: 11px;
+    touch-action: manipulation;
   }
   #aspectFitBtn span, #fullscreenBtn span, #mobileBtn span {
     display: none;
@@ -1065,6 +1106,7 @@ video::-webkit-media-controls {
   .toggle-sidebar-btn {
     padding: 4px 8px;
     font-size: 11px;
+    touch-action: manipulation;
   }
   .toggle-sidebar-btn span {
     display: none;
@@ -1075,8 +1117,11 @@ video::-webkit-media-controls {
     flex-direction: column;
     height: calc(100vh - 44px);
     height: calc(100dvh - 44px);
+    min-height: 0;
     width: 100vw;
     overflow: hidden;
+    overscroll-behavior: none !important;
+    overscroll-behavior-y: none !important;
   }
 
   /* Video Stage: Top block */
@@ -1088,6 +1133,7 @@ video::-webkit-media-controls {
     flex-direction: column;
     background: #000;
     z-index: 10;
+    touch-action: manipulation;
   }
 
   /* Fluid 16:9 Aspect Ratio on Mobile */
@@ -1099,6 +1145,7 @@ video::-webkit-media-controls {
     padding: 0;
     gap: 2px;
     background: #000;
+    touch-action: manipulation;
   }
 
   .video-grid.layout-1 .stream-slot {
@@ -1107,6 +1154,7 @@ video::-webkit-media-controls {
     border-radius: 0;
     border-left: none;
     border-right: none;
+    touch-action: manipulation;
   }
 
   .stage-footer {
@@ -1118,6 +1166,9 @@ video::-webkit-media-controls {
     overflow-x: auto;
     scrollbar-width: none;
     flex-shrink: 0;
+    touch-action: pan-x;
+    overscroll-behavior-x: contain;
+    -webkit-overflow-scrolling: touch;
   }
   .stage-footer::-webkit-scrollbar {
     display: none;
@@ -1129,9 +1180,11 @@ video::-webkit-media-controls {
   .tool-chip {
     font-size: 10.5px;
     padding: 3px 7px;
+    touch-action: manipulation;
   }
   .volume-slider {
     width: 50px;
+    touch-action: pan-x;
   }
 
   /* Programming Sidebar: Bottom section with independent scrolling */
@@ -1140,7 +1193,7 @@ video::-webkit-media-controls {
     min-width: 100% !important;
     flex: 1 1 0% !important;
     min-height: 0 !important;
-    height: auto !important;
+    height: 100% !important;
     margin-right: 0 !important;
     border-left: none;
     border-top: 1px solid var(--border-subtle);
@@ -1148,6 +1201,8 @@ video::-webkit-media-controls {
     flex-direction: column;
     overflow: hidden;
     background: var(--bg-panel);
+    touch-action: pan-y;
+    overscroll-behavior-y: contain;
   }
 
   .sidebar.collapsed {
@@ -1167,21 +1222,52 @@ video::-webkit-media-controls {
 
   .sidebar-header {
     padding: 6px 8px;
+    flex-shrink: 0;
   }
   .search-row {
     padding: 6px 8px;
+    flex-shrink: 0;
   }
   .filter-row {
     padding: 4px 8px;
+    flex-shrink: 0;
+    touch-action: pan-x;
+    overscroll-behavior-x: contain;
+  }
+  .filter-chips-scroll {
+    touch-action: pan-x;
+    overscroll-behavior-x: contain;
+    -webkit-overflow-scrolling: touch;
   }
 
   .sidebar-list {
-    flex: 1 1 0%;
-    min-height: 0;
-    overflow-y: auto;
-    -webkit-overflow-scrolling: touch;
-    overscroll-behavior: contain;
-    padding: 6px 8px env(safe-area-inset-bottom, 8px);
+    flex: 1 1 0% !important;
+    min-height: 0 !important;
+    height: auto !important;
+    overflow-y: auto !important;
+    overflow-x: hidden !important;
+    -webkit-overflow-scrolling: touch !important;
+    touch-action: pan-y !important;
+    overscroll-behavior: contain !important;
+    overscroll-behavior-y: contain !important;
+    padding: 6px 8px calc(env(safe-area-inset-bottom, 8px) + 20px) !important;
+    will-change: scroll-position;
+  }
+  .sidebar-list > * {
+    flex-shrink: 0 !important;
+    touch-action: pan-y !important;
+  }
+  .event-card {
+    touch-action: pan-y !important;
+    -webkit-user-select: none !important;
+    user-select: none !important;
+    -webkit-tap-highlight-color: transparent !important;
+  }
+  .event-card * {
+    touch-action: pan-y !important;
+  }
+  .event-card .add-multistream-btn {
+    touch-action: manipulation !important;
   }
 }
 

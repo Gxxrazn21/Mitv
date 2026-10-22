@@ -1,0 +1,85 @@
+/* Touch scrolling, layout stability & gesture isolation for touch & mobile devices */
+@media (pointer: coarse), (max-width: 860px) {
+  html:not(.tv-mode),
+  html:not(.tv-mode) body {
+    overscroll-behavior: none !important;
+    overscroll-behavior-y: none !important;
+    -webkit-overflow-scrolling: touch !important;
+  }
+
+  html:not(.tv-mode) .app-stage {
+    min-height: 0 !important;
+    overscroll-behavior: none !important;
+    overscroll-behavior-y: none !important;
+  }
+
+  html:not(.tv-mode) .stage {
+    touch-action: manipulation !important;
+  }
+
+  html:not(.tv-mode) .video-grid {
+    touch-action: manipulation !important;
+  }
+
+  html:not(.tv-mode) .stream-slot {
+    touch-action: manipulation !important;
+  }
+
+  html:not(.tv-mode) .stage-footer {
+    touch-action: pan-x !important;
+    overscroll-behavior-x: contain !important;
+    -webkit-overflow-scrolling: touch !important;
+  }
+
+  html:not(.tv-mode) .sidebar {
+    min-height: 0 !important;
+    touch-action: pan-y !important;
+    overscroll-behavior: contain !important;
+    overscroll-behavior-y: contain !important;
+  }
+
+  html:not(.tv-mode) .sidebar-list {
+    min-height: 0 !important;
+    overflow-y: auto !important;
+    overflow-x: hidden !important;
+    touch-action: pan-y !important;
+    overscroll-behavior: contain !important;
+    overscroll-behavior-y: contain !important;
+    -webkit-overflow-scrolling: touch !important;
+    will-change: scroll-position;
+  }
+
+  /* Prevent long event lists from squishing rows */
+  html:not(.tv-mode) .sidebar-list > * {
+    flex-shrink: 0 !important;
+    touch-action: pan-y !important;
+  }
+
+  html:not(.tv-mode) .event-card {
+    touch-action: pan-y !important;
+    -webkit-user-select: none !important;
+    user-select: none !important;
+    -webkit-tap-highlight-color: transparent !important;
+  }
+
+  html:not(.tv-mode) .event-card * {
+    touch-action: pan-y !important;
+  }
+
+  html:not(.tv-mode) .event-card .add-multistream-btn {
+    touch-action: manipulation !important;
+  }
+
+  html:not(.tv-mode) .sidebar-header,
+  html:not(.tv-mode) .search-row,
+  html:not(.tv-mode) .filter-row {
+    flex-shrink: 0 !important;
+  }
+
+  html:not(.tv-mode) .filter-row,
+  html:not(.tv-mode) .filter-chips-scroll {
+    touch-action: pan-x !important;
+    overscroll-behavior-x: contain !important;
+    -webkit-overflow-scrolling: touch !important;
+  }
+}
