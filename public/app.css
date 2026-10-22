@@ -121,87 +121,76 @@ html, body {
   text-overflow: ellipsis;
 }
 
-/* Segmented Control */
+/* Segmented Control: Minimalist Vercel / Apple TV style */
 .segmented-control {
   display: flex;
-  background: #0b0b0e;
+  background: #09090c;
   border: 1px solid var(--border-subtle);
-  border-radius: 5px;
-  padding: 2px;
-  gap: 2px;
+  border-radius: 6px;
+  padding: 3px;
+  gap: 3px;
+  user-select: none;
 }
 .segmented-control.full-width {
   width: 100%;
 }
 .seg-btn {
-  flex: 1;
-  display: flex;
+  display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 5px;
+  gap: 6px;
   background: transparent;
   border: none;
   color: var(--text-secondary);
-  font-size: 11.5px;
+  font-size: 12px;
   font-weight: 500;
-  padding: 4px 10px;
+  padding: 5px 12px;
   border-radius: 4px;
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: all 0.15s cubic-bezier(0.16, 1, 0.3, 1);
   white-space: nowrap;
+}
+.seg-btn svg {
+  flex-shrink: 0;
+  opacity: 0.8;
 }
 .seg-btn:hover {
   color: var(--text-main);
+  background: rgba(255, 255, 255, 0.05);
 }
 .seg-btn.active {
   background: var(--accent-purple);
   color: #fff;
   font-weight: 600;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
+}
+.seg-btn.active svg {
+  opacity: 1;
 }
 
-/* Topbar Buttons */
-.topbar-btn {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  background: var(--bg-card);
-  border: 1px solid var(--border-subtle);
-  color: var(--text-secondary);
-  font-size: 11.5px;
-  font-weight: 500;
-  padding: 5px 10px;
-  border-radius: 4px;
-  cursor: pointer;
-  transition: all 0.15s ease;
-}
-.topbar-btn:hover {
-  background: var(--bg-card-hover);
-  color: var(--text-main);
-  border-color: var(--border-active);
-}
-
-.enhance-btn strong {
-  color: var(--accent-purple-hover);
-  font-weight: 700;
-}
-
+/* Toggle Sidebar / Partidos Button */
 .toggle-sidebar-btn {
-  display: flex;
+  display: inline-flex;
   align-items: center;
-  gap: 6px;
-  background: var(--bg-card);
+  gap: 7px;
+  background: #15151c;
   border: 1px solid var(--border-subtle);
   color: var(--text-main);
-  font-size: 12px;
-  font-weight: 500;
-  padding: 5px 11px;
-  border-radius: 4px;
+  font-size: 12.5px;
+  font-weight: 600;
+  padding: 6px 14px;
+  border-radius: 6px;
   cursor: pointer;
   transition: all 0.15s ease;
+  user-select: none;
 }
 .toggle-sidebar-btn:hover {
   background: var(--bg-card-hover);
   border-color: var(--accent-purple);
+  box-shadow: 0 0 12px var(--accent-purple-glow);
+}
+.toggle-sidebar-btn:active {
+  transform: scale(0.97);
 }
 
 /* ==========================================================================
@@ -294,9 +283,51 @@ video::-webkit-media-controls {
   z-index: 2147483647;
   position: relative;
 }
-:fullscreen video {
+
+/* True 100% Fullscreen without letterboxing or leftover bars */
+:fullscreen, :-webkit-full-screen {
+  background: #000 !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  width: 100vw !important;
+  height: 100vh !important;
+}
+:fullscreen .topbar, :-webkit-full-screen .topbar {
+  display: none !important;
+}
+:fullscreen .stage-footer, :-webkit-full-screen .stage-footer {
+  display: none !important;
+}
+:fullscreen .sidebar, :-webkit-full-screen .sidebar {
+  display: none !important;
+}
+:fullscreen .app-stage, :-webkit-full-screen .app-stage {
+  height: 100vh !important;
+  width: 100vw !important;
+  margin: 0 !important;
+  padding: 0 !important;
+}
+:fullscreen .stage, :-webkit-full-screen .stage {
+  height: 100vh !important;
+  width: 100vw !important;
+  margin: 0 !important;
+  padding: 0 !important;
+}
+:fullscreen .video-grid, :-webkit-full-screen .video-grid {
+  height: 100vh !important;
+  width: 100vw !important;
+  max-height: 100vh !important;
+  padding: 0 !important;
+  gap: 2px !important;
+}
+:fullscreen video, :-webkit-full-screen video {
   max-width: 100vw !important;
   max-height: 100vh !important;
+  width: 100% !important;
+  height: 100% !important;
+}
+:fullscreen .stream-slot, :-webkit-full-screen .stream-slot {
+  border-radius: 0 !important;
 }
 
 /* Stream Slot Box */
@@ -1069,14 +1100,14 @@ video.no-filter {
     height: 44px;
     min-height: 44px;
     max-height: 44px;
-    padding: 0 8px;
-    gap: 6px;
+    padding: 0 10px;
+    gap: 8px;
     flex-shrink: 0;
+    justify-content: space-between;
   }
 
   .topbar-left {
     flex-shrink: 0;
-    gap: 6px;
   }
   .active-match-title {
     display: none !important;
@@ -1086,44 +1117,27 @@ video.no-filter {
   }
 
   .topbar-center {
-    overflow-x: auto;
-    scrollbar-width: none;
-    -ms-overflow-style: none;
-    padding: 2px 0;
-    gap: 5px;
+    display: flex;
+    justify-content: center;
+    align-items: center;
     flex: 1;
-    justify-content: flex-start;
-    touch-action: pan-x;
-    overscroll-behavior-x: contain;
-    -webkit-overflow-scrolling: touch;
-  }
-  .topbar-center::-webkit-scrollbar {
-    display: none;
+    min-width: 0;
+    padding: 0;
   }
 
   .seg-btn {
-    padding: 3px 7px;
-    font-size: 11px;
+    padding: 4px 8px;
+    font-size: 11.5px;
+    gap: 4px;
     touch-action: manipulation;
-  }
-  .topbar-btn {
-    padding: 4px 7px;
-    font-size: 11px;
-    touch-action: manipulation;
-  }
-  #aspectFitBtn span, #fullscreenBtn span, #mobileBtn span {
-    display: none;
-  }
-  #enhanceBtn span:not(.sparkle-icon) {
-    display: none;
   }
   .toggle-sidebar-btn {
-    padding: 4px 8px;
-    font-size: 11px;
+    padding: 5px 10px;
+    font-size: 11.5px;
     touch-action: manipulation;
   }
   .toggle-sidebar-btn span {
-    display: none;
+    display: inline;
   }
 
   /* App Stage Container (100dvh - 44px) */

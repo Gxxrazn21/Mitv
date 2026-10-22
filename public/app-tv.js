@@ -213,6 +213,13 @@ function initSlots() {
     });
 
     slot.slotEl.addEventListener('click', handleSlotActivation);
+    slot.slotEl.addEventListener('dblclick', () => {
+      if (!document.fullscreenElement) {
+        document.documentElement.requestFullscreen?.().catch(() => {});
+      } else {
+        document.exitFullscreen().catch(() => {});
+      }
+    });
     slot.videoEl.addEventListener('click', (e) => {
       e.preventDefault();
       handleSlotActivation(e);
@@ -1168,8 +1175,22 @@ function renderSidebarList() {
       `;
     }
 
+    // Touch drag isolation: ignore clicks triggered during scrolling gestures
+    let startY = 0;
+    let isDrag = false;
+    card.addEventListener('pointerdown', (e) => {
+      startY = e.clientY;
+      isDrag = false;
+    });
+    card.addEventListener('pointermove', (e) => {
+      if (Math.abs(e.clientY - startY) > 8) {
+        isDrag = true;
+      }
+    });
+
     // Clicking card tunes into focused slot
     card.addEventListener('click', (e) => {
+      if (isDrag) return;
       if (e.target.classList.contains('add-multistream-btn')) return;
       loadStreamInSlot(focusedSlotIdx, item, 0);
     });
@@ -1215,13 +1236,16 @@ function setupUIEventListeners() {
   });
 
   // Aspect fit toggle
-  document.getElementById('aspectFitBtn').addEventListener('click', cycleScreenFit);
+  const aspectFitBtn = document.getElementById('aspectFitBtn');
+  if (aspectFitBtn) aspectFitBtn.addEventListener('click', cycleScreenFit);
 
   // GPU Image Enhancement toggle
-  document.getElementById('enhanceBtn').addEventListener('click', cycleImageEnhance);
+  const enhanceBtn = document.getElementById('enhanceBtn');
+  if (enhanceBtn) enhanceBtn.addEventListener('click', cycleImageEnhance);
 
   // Quality selector / 1080p force toggle
-  document.getElementById('qualityBtn').addEventListener('click', toggleForceMaxQuality);
+  const qualityBtn = document.getElementById('qualityBtn');
+  if (qualityBtn) qualityBtn.addEventListener('click', toggleForceMaxQuality);
 
   // Dedicated Play / Pause button in footer
   const playPauseFocusedBtn = document.getElementById('playPauseFocusedBtn');
@@ -1235,31 +1259,40 @@ function setupUIEventListeners() {
   }
 
   // Auto-fastest probe button
-  document.getElementById('autoFastestBtn').addEventListener('click', probeFastestForFocusedSlot);
+  const autoFastestBtn = document.getElementById('autoFastestBtn');
+  if (autoFastestBtn) autoFastestBtn.addEventListener('click', probeFastestForFocusedSlot);
 
   // Reload current button in footer
-  document.getElementById('reloadCurrentBtn').addEventListener('click', () => {
-    const slot = slots[focusedSlotIdx];
-    if (slot && slot.currentMatch) {
-      loadStreamInSlot(focusedSlotIdx, slot.currentMatch, slot.currentOptionIdx);
-    }
-  });
+  const reloadCurrentBtn = document.getElementById('reloadCurrentBtn');
+  if (reloadCurrentBtn) {
+    reloadCurrentBtn.addEventListener('click', () => {
+      const slot = slots[focusedSlotIdx];
+      if (slot && slot.currentMatch) {
+        loadStreamInSlot(focusedSlotIdx, slot.currentMatch, slot.currentOptionIdx);
+      }
+    });
+  }
 
   // Toggle Sidebar visibility
   const sidebar = document.getElementById('sidebar');
   const toggleSidebarBtn = document.getElementById('toggleSidebarBtn');
-  toggleSidebarBtn.addEventListener('click', () => {
-    sidebar.classList.toggle('collapsed');
-  });
+  if (toggleSidebarBtn && sidebar) {
+    toggleSidebarBtn.addEventListener('click', () => {
+      sidebar.classList.toggle('collapsed');
+    });
+  }
 
   // Fullscreen button
-  document.getElementById('fullscreenBtn').addEventListener('click', () => {
-    if (!document.fullscreenElement) {
-      document.documentElement.requestFullscreen?.().catch(() => {});
-    } else {
-      document.exitFullscreen().catch(() => {});
-    }
-  });
+  const fullscreenBtn = document.getElementById('fullscreenBtn');
+  if (fullscreenBtn) {
+    fullscreenBtn.addEventListener('click', () => {
+      if (!document.fullscreenElement) {
+        document.documentElement.requestFullscreen?.().catch(() => {});
+      } else {
+        document.exitFullscreen().catch(() => {});
+      }
+    });
+  }
 
   // Tabs: Matches / Channels
   const tabMatches = document.getElementById('tabMatches');

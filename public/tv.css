@@ -1,44 +1,266 @@
-/* TV only: the original desktop/mobile stylesheet is unchanged. */
-.tv-mode body { display:flex; flex-direction:column; padding:5vh 5vw; font-size:14px; }
-/* Scrolling follows D-pad focus; there are no visible scrollbar controls. */
-.tv-mode * { scrollbar-width:none; -ms-overflow-style:none; }
-.tv-mode *::-webkit-scrollbar { display:none; width:0; height:0; }
-.tv-mode button:focus, .tv-mode input:focus, .tv-mode [tabindex="0"]:focus { outline:3px solid #f4f4ff; outline-offset:-3px; }
-.tv-mode .event-card:focus { background:#343044; }
-.tv-mode .stream-slot:focus { outline-width:4px; }
-/* Controls retain their width in a single scrollable row. */
-.tv-mode .topbar { flex:0 0 54px; height:54px; min-height:54px; max-height:54px; flex-wrap:nowrap; padding:4px 8px; gap:8px; }
-.tv-mode .topbar-left, .tv-mode .topbar-right { flex:0 0 auto; }
-.tv-mode .active-match-title, .tv-mode .topbar-divider { display:none; }
-.tv-mode .topbar-center { flex:1 1 0%; min-width:0; overflow-x:auto; overflow-y:hidden; white-space:nowrap; padding:3px; }
-.tv-mode .topbar-center > *, .tv-mode .segmented-control > button, .tv-mode .slot-actions > button, .tv-mode .filter-chip, .tv-mode .server-chip, .tv-mode .stage-footer > * { flex-shrink:0; }
-.tv-mode .topbar-btn, .tv-mode .seg-btn, .tv-mode .toggle-sidebar-btn, .tv-mode .tool-chip, .tv-mode .server-chip, .tv-mode .filter-chip { min-height:36px; font-size:13px; white-space:nowrap; }
-.tv-mode .app-stage { flex:1 1 0%; height:auto; width:100%; min-height:0; flex-direction:row; overflow:hidden; }
-.tv-mode .stage { flex:1 1 0%; width:auto; min-width:0; min-height:0; height:100%; }
-.tv-mode .video-grid { flex:1 1 0%; min-height:0; min-width:0; aspect-ratio:auto; max-height:none; }
-.tv-mode .stream-slot { min-width:0; min-height:0; }
-.tv-mode .sidebar { width:28vw !important; min-width:200px !important; flex:0 0 28vw !important; height:100% !important; min-height:0; margin-right:0 !important; }
-.tv-mode .sidebar.collapsed { display:none !important; }
-.tv-mode .sidebar-header, .tv-mode .search-row, .tv-mode .filter-row { flex-shrink:0; }
-.tv-mode .sidebar-list { min-height:0; scroll-behavior:auto; }
-.tv-mode .event-card { flex-shrink:0; min-height:58px; }
-.tv-mode .event-name { font-size:14px; }
-.tv-mode .search-input-box { min-width:0; }
-.tv-mode .search-input-box input { height:36px; font-size:13px; }
-.tv-mode .search-reload-btn, .tv-mode .add-multistream-btn { flex:0 0 32px; width:32px; height:32px; }
-.tv-mode .stage-footer { flex:0 0 50px; height:50px; min-height:50px; max-height:50px; flex-wrap:nowrap; overflow-x:auto; overflow-y:hidden; padding:4px 8px; }
-.tv-mode .server-chips-wrapper { flex:0 0 auto; overflow:visible; }
-.tv-mode .slot-floating-bar { visibility:hidden; height:42px; padding:3px 6px; gap:6px; background:#18181e; z-index:10; }
-.tv-mode .stream-slot:hover .slot-floating-bar, .tv-mode .stream-slot:focus-within .slot-floating-bar { visibility:visible; opacity:1; pointer-events:auto; }
-.tv-mode .slot-title { flex:1 1 0%; min-width:0; }
-.tv-mode .slot-actions { flex:0 0 auto; }
-.tv-mode .slot-mini-btn { width:32px; height:34px; }
-.tv-mode .stream-slot:focus-within { z-index:2; }
-.tv-mode .stream-slot:focus-within .slot-audio-badge { visibility:hidden; }
-.tv-mode .slot-media-box, .tv-mode .slot-video { transform:translateZ(0); }
-.tv-mode .modal-layer { padding:5vh 5vw; }
-.tv-mode .modal-box { max-height:90vh; overflow-y:auto; }
-.tv-mode *, .tv-mode *::before, .tv-mode *::after { transition:none !important; box-shadow:none !important; backdrop-filter:none !important; }
-.tv-mode .brand-dot, .tv-mode .red-dot { animation:none; }
-.tv-mode #videoGrid video, .tv-mode #videoGrid iframe { filter:none !important; will-change:auto; }
-.tv-mode .event-card:hover, .tv-mode button:hover { transform:none; }
+/* ==========================================================================
+   MiTV — Smart TV (Android TV / Fire OS / WebView) Optimized Stylesheet
+   Edge-to-edge true fullscreen, safe area overscan, zero letterbox padding.
+   ========================================================================== */
+
+.tv-mode body {
+  display: flex;
+  flex-direction: column;
+  padding: 0 !important;
+  margin: 0 !important;
+  width: 100vw !important;
+  height: 100vh !important;
+  height: 100dvh !important;
+  font-size: 14px;
+  background: #000;
+  overflow: hidden;
+}
+
+/* Scrolling follows D-pad focus; scrollbars are hidden */
+.tv-mode * {
+  scrollbar-width: none !important;
+  -ms-overflow-style: none !important;
+}
+.tv-mode *::-webkit-scrollbar {
+  display: none !important;
+  width: 0 !important;
+  height: 0 !important;
+}
+
+/* Distinctive high-visibility TV remote focus ring */
+.tv-mode button:focus,
+.tv-mode input:focus,
+.tv-mode [tabindex="0"]:focus {
+  outline: 3px solid #a855f7 !important;
+  outline-offset: -2px !important;
+}
+.tv-mode .event-card:focus {
+  background: #2a233c !important;
+  border-color: #a855f7 !important;
+}
+.tv-mode .stream-slot:focus {
+  outline: 3px solid #c084fc !important;
+  outline-offset: -3px !important;
+}
+
+/* Minimalist Top Bar on Smart TV */
+.tv-mode .topbar {
+  flex: 0 0 48px;
+  height: 48px;
+  min-height: 48px;
+  max-height: 48px;
+  flex-wrap: nowrap;
+  padding: 0 max(2vw, 16px);
+  gap: 12px;
+  background: #0a0a0e;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+.tv-mode .topbar-left,
+.tv-mode .topbar-right {
+  flex: 0 0 auto;
+}
+.tv-mode .active-match-title,
+.tv-mode .topbar-divider {
+  display: block !important;
+  max-width: 32vw;
+  font-size: 13px;
+}
+.tv-mode .topbar-center {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding: 0;
+}
+.tv-mode .segmented-control {
+  background: #14141b;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  padding: 2px;
+  gap: 4px;
+}
+.tv-mode .seg-btn {
+  min-height: 34px;
+  font-size: 13px;
+  padding: 4px 14px;
+  white-space: nowrap;
+}
+.tv-mode .toggle-sidebar-btn {
+  min-height: 34px;
+  font-size: 13px;
+  padding: 4px 14px;
+  white-space: nowrap;
+}
+
+/* App Stage & Video Stage: True 100% Full Screen */
+.tv-mode .app-stage {
+  flex: 1 1 0%;
+  height: calc(100vh - 48px);
+  width: 100vw;
+  min-height: 0;
+  flex-direction: row;
+  overflow: hidden;
+  background: #000;
+}
+.tv-mode .stage {
+  flex: 1 1 0%;
+  width: auto;
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  background: #000;
+}
+.tv-mode .video-grid {
+  flex: 1 1 0%;
+  min-height: 0;
+  min-width: 0;
+  aspect-ratio: auto;
+  max-height: none;
+  width: 100%;
+  height: 100%;
+  padding: 2px;
+  gap: 3px;
+  background: #000;
+}
+
+/* Symmetrical layouts */
+.tv-mode .video-grid.layout-1 {
+  grid-template-columns: 1fr;
+  grid-template-rows: 1fr;
+}
+.tv-mode .video-grid.layout-2 {
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: 1fr;
+}
+.tv-mode .video-grid.layout-4 {
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: 1fr 1fr;
+}
+
+.tv-mode .stream-slot {
+  min-width: 0;
+  min-height: 0;
+  width: 100%;
+  height: 100%;
+  border-radius: 4px;
+}
+
+/* TV Sidebar for Matches & Channels */
+.tv-mode .sidebar {
+  width: 28vw !important;
+  min-width: 240px !important;
+  flex: 0 0 28vw !important;
+  height: 100% !important;
+  min-height: 0;
+  margin-right: 0 !important;
+  background: #0d0d12;
+  border-left: 1px solid rgba(255, 255, 255, 0.08);
+}
+.tv-mode .sidebar.collapsed {
+  display: none !important;
+}
+.tv-mode .sidebar-header,
+.tv-mode .search-row,
+.tv-mode .filter-row {
+  flex-shrink: 0;
+}
+.tv-mode .sidebar-list {
+  min-height: 0;
+  scroll-behavior: auto;
+  padding: 6px 8px;
+}
+.tv-mode .event-card {
+  flex-shrink: 0;
+  min-height: 56px;
+  background: #15151c;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 6px;
+  margin-bottom: 6px;
+}
+.tv-mode .event-name {
+  font-size: 13.5px;
+  font-weight: 600;
+}
+
+/* TV Stage Footer */
+.tv-mode .stage-footer {
+  flex: 0 0 42px;
+  height: 42px;
+  min-height: 42px;
+  max-height: 42px;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 0 max(2vw, 12px);
+  background: #09090c;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+.tv-mode .server-chips-wrapper {
+  flex: 0 0 auto;
+  overflow: visible;
+}
+.tv-mode .slot-floating-bar {
+  visibility: hidden;
+  height: 38px;
+  padding: 2px 6px;
+  gap: 6px;
+  background: rgba(18, 18, 24, 0.95);
+  z-index: 10;
+}
+.tv-mode .stream-slot:hover .slot-floating-bar,
+.tv-mode .stream-slot:focus-within .slot-floating-bar {
+  visibility: visible;
+  opacity: 1;
+  pointer-events: auto;
+}
+.tv-mode .slot-title {
+  flex: 1 1 0%;
+  min-width: 0;
+  font-size: 12px;
+}
+.tv-mode .slot-actions {
+  flex: 0 0 auto;
+}
+.tv-mode .slot-mini-btn {
+  width: 30px;
+  height: 30px;
+}
+.tv-mode .stream-slot:focus-within {
+  z-index: 2;
+}
+.tv-mode .stream-slot:focus-within .slot-audio-badge {
+  visibility: hidden;
+}
+.tv-mode .slot-media-box,
+.tv-mode .slot-video {
+  transform: translateZ(0);
+}
+.tv-mode .modal-layer {
+  padding: 3vh 3vw;
+}
+.tv-mode .modal-box {
+  max-height: 90vh;
+  overflow-y: auto;
+}
+.tv-mode *,
+.tv-mode *::before,
+.tv-mode *::after {
+  transition: none !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+}
+.tv-mode .brand-dot,
+.tv-mode .red-dot {
+  animation: none;
+}
+.tv-mode #videoGrid video,
+.tv-mode #videoGrid iframe {
+  filter: none !important;
+  will-change: auto;
+}
+.tv-mode .event-card:hover,
+.tv-mode button:hover {
+  transform: none;
+}

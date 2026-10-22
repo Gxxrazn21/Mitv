@@ -1,4 +1,8 @@
-/* Touch scrolling, layout stability & gesture isolation for touch & mobile devices */
+/* ==========================================================================
+   MiTV — Touch scrolling, layout stability & gesture isolation
+   Guarantees independent, smooth 60/120fps list scroll without video conflict.
+   ========================================================================== */
+
 @media (pointer: coarse), (max-width: 860px) {
   html:not(.tv-mode),
   html:not(.tv-mode) body {
@@ -13,16 +17,14 @@
     overscroll-behavior-y: none !important;
   }
 
-  html:not(.tv-mode) .stage {
-    touch-action: manipulation !important;
-  }
-
-  html:not(.tv-mode) .video-grid {
-    touch-action: manipulation !important;
-  }
-
-  html:not(.tv-mode) .stream-slot {
-    touch-action: manipulation !important;
+  /* Isolate video stage from touch drag gestures so video never conflicts with scrolling */
+  html:not(.tv-mode) .stage,
+  html:not(.tv-mode) .video-grid,
+  html:not(.tv-mode) .stream-slot,
+  html:not(.tv-mode) .slot-media-box {
+    touch-action: none !important;
+    user-select: none !important;
+    -webkit-user-select: none !important;
   }
 
   html:not(.tv-mode) .stage-footer {
@@ -38,6 +40,7 @@
     overscroll-behavior-y: contain !important;
   }
 
+  /* Independent, frictionless vertical scroll for matches and channels */
   html:not(.tv-mode) .sidebar-list {
     min-height: 0 !important;
     overflow-y: auto !important;
@@ -49,7 +52,7 @@
     will-change: scroll-position;
   }
 
-  /* Prevent long event lists from squishing rows */
+  /* Prevent row squishing during momentum scrolling */
   html:not(.tv-mode) .sidebar-list > * {
     flex-shrink: 0 !important;
     touch-action: pan-y !important;

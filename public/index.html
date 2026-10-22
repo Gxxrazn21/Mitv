@@ -48,54 +48,40 @@
     </div>
 
     <div class="topbar-center">
-      <!-- Layout Selector [1] [2] [4] -->
-      <div class="segmented-control" id="layoutSelector">
-        <button class="seg-btn active" data-layout="1" title="1 Pantalla completa">1 Pantalla</button>
-        <button class="seg-btn" data-layout="2" title="2 Pantallas lado a lado">2 Split</button>
-        <button class="seg-btn" data-layout="4" title="4 Pantallas simultáneas (Quad 2x2)">4 Quad</button>
+      <!-- Layout Selector: 1, 2, 4 Pantallas -->
+      <div class="segmented-control" id="layoutSelector" role="toolbar" aria-label="Distribución de pantallas">
+        <button class="seg-btn active" data-layout="1" title="1 Pantalla completa">
+          <svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.8">
+            <rect x="2" y="2" width="12" height="12" rx="2"></rect>
+          </svg>
+          <span>1 Pantalla</span>
+        </button>
+        <button class="seg-btn" data-layout="2" title="2 Pantallas divididas">
+          <svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.8">
+            <rect x="2" y="2" width="12" height="12" rx="2"></rect>
+            <line x1="8" y1="2" x2="8" y2="14"></line>
+          </svg>
+          <span>2 Split</span>
+        </button>
+        <button class="seg-btn" data-layout="4" title="4 Pantallas simultáneas">
+          <svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.8">
+            <rect x="2" y="2" width="12" height="12" rx="2"></rect>
+            <line x1="8" y1="2" x2="8" y2="14"></line>
+            <line x1="2" y1="8" x2="14" y2="8"></line>
+          </svg>
+          <span>4 Quad</span>
+        </button>
       </div>
-
-      <!-- Aspect Fit Toggle -->
-      <button class="topbar-btn" id="aspectFitBtn" title="Ajuste de pantalla (16:9 / Llenar / Zoom)">
-        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
-          <rect x="2" y="4" width="20" height="16" rx="2"></rect>
-          <path d="M7 10l5 5 5-5"></path>
-        </svg>
-        <span id="aspectFitLabel">16:9</span>
-      </button>
-
-      <!-- GPU Image Enhancement Toggle -->
-      <button class="topbar-btn enhance-btn" id="enhanceBtn" title="Mejora de imagen por GPU (Nitidez y Color deportivo)">
-        <span class="sparkle-icon">✨</span>
-        <span id="enhanceText">Mejorar Imagen: <strong id="enhanceLabel">HD Nitidez</strong></span>
-      </button>
-
-      <!-- Fullscreen Toggle -->
-      <button class="topbar-btn" id="fullscreenBtn" title="Pantalla completa (F)">
-        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
-          <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/>
-        </svg>
-        <span>Pantalla Completa</span>
-      </button>
-
-      <!-- Mobile / LAN Handoff -->
-      <button class="topbar-btn" id="mobileBtn" title="Ver en el móvil o red local">
-        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
-          <rect x="5" y="2" width="14" height="20" rx="2"></rect>
-          <line x1="12" y1="18" x2="12.01" y2="18"></line>
-        </svg>
-        <span>Móvil / LAN</span>
-      </button>
     </div>
 
     <div class="topbar-right">
-      <!-- Toggle Sidebar Visibility (Allows video to take 100% width) -->
-      <button class="toggle-sidebar-btn" id="toggleSidebarBtn" title="Ocultar / Mostrar programación lateral">
+      <!-- Acceso esencial: Partidos y Canales en vivo -->
+      <button class="toggle-sidebar-btn" id="toggleSidebarBtn" title="Ver programación de partidos y canales">
         <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2">
           <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
           <line x1="15" y1="3" x2="15" y2="21"></line>
         </svg>
-        <span id="toggleSidebarText">Canales y Partidos</span>
+        <span id="toggleSidebarText">Partidos</span>
       </button>
     </div>
   </header>
@@ -336,6 +322,12 @@
         </div>
       </div>
     </div>
+  <!-- Hidden Auxiliary Elements for API / Shortcut compatibility -->
+  <div id="hiddenLegacyControls" style="display:none;" aria-hidden="true">
+    <button id="aspectFitBtn"></button>
+    <button id="enhanceBtn"></button>
+    <button id="fullscreenBtn"></button>
+    <button id="mobileBtn"></button>
   </div>
 
   <script src="player-entry.js?v=8.2"></script>
