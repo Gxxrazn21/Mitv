@@ -56,11 +56,20 @@ function isSafeExternalUrl(rawUrl) {
   if (!rawUrl || typeof rawUrl !== 'string') {
     return { safe: false, reason: 'URL nula o no válida' };
   }
+  let trimmed = rawUrl.trim();
+  if (trimmed.startsWith('//')) {
+    trimmed = 'https:' + trimmed;
+  }
+
   let parsed;
   try {
-    parsed = new URL(rawUrl);
+    parsed = new URL(trimmed);
   } catch (e) {
-    return { safe: false, reason: 'Formato de URL no válido' };
+    try {
+      parsed = new URL(trimmed, 'https://pirlotv.la/');
+    } catch (e2) {
+      return { safe: false, reason: 'Formato de URL no válido' };
+    }
   }
 
   if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
@@ -68,14 +77,16 @@ function isSafeExternalUrl(rawUrl) {
   }
 
   const hostname = parsed.hostname.toLowerCase();
+  // Permissive filtering: block only internal loopback and cloud metadata vectors
   if (
     hostname === 'localhost' ||
     hostname.endsWith('.localhost') ||
-    hostname.endsWith('.local') ||
-    hostname.endsWith('.internal') ||
-    hostname === '0.0.0.0'
+    hostname === '127.0.0.1' ||
+    hostname === '0.0.0.0' ||
+    hostname === '169.254.169.254' ||
+    hostname === 'metadata.google.internal'
   ) {
-    return { safe: false, reason: 'Acceso a host local prohibido (Anti-SSRF)' };
+    return { safe: false, reason: 'Acceso a host local o metadata prohibido (Anti-SSRF)' };
   }
 
   if (isPrivateIp(hostname)) {
@@ -175,17 +186,15 @@ function getLegitimateHeaders(targetUrl, incomingReferer = null, customHeaders =
         effectiveReferer = 'https://streamtp.live/';
       } else if (host.includes('rudo.video')) {
         effectiveReferer = 'https://rudo.video/';
-      } else if (host.includes('pirlotv')) {
-        effectiveReferer = 'https://pirlotv.la/';
       } else {
-        effectiveReferer = `${targetObj.protocol}//${targetObj.hostname}/`;
+        effectiveReferer = 'https://pirlotv.la/';
       }
     } else {
-      effectiveReferer = 'https://cdplay.live/';
+      effectiveReferer = 'https://pirlotv.la/';
     }
   }
 
-  let effectiveOrigin = 'https://cdplay.live';
+  let effectiveOrigin = 'https://pirlotv.la';
   try {
     effectiveOrigin = new URL(effectiveReferer).origin;
   } catch (e) {
@@ -193,10 +202,12 @@ function getLegitimateHeaders(targetUrl, incomingReferer = null, customHeaders =
   }
 
   return {
-    'User-Agent': USER_AGENT,
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
     'Accept': '*/*',
     'Accept-Language': 'es-ES,es;q=0.9,en;q=0.8',
-    'Sec-Ch-Ua': '"Chromium";v="126", "Not/A)Brand";v="8", "Google Chrome";v="126"',
+    'Cache-Control': 'no-cache',
+    'Pragma': 'no-cache',
+    'Sec-Ch-Ua': '"Chromium";v="124", "Google Chrome";v="124", "Not-A.Brand";v="99"',
     'Sec-Ch-Ua-Mobile': '?0',
     'Sec-Ch-Ua-Platform': '"Windows"',
     'Sec-Fetch-Dest': 'empty',
@@ -220,7 +231,7 @@ async function safeFetch(url, options = {}, timeoutMs = 12000) {
       defaultHeaders['Cookie'] = cookie;
     }
 
-    const res = await fetch(url, {
+    let res = await fetch(url, {
       redirect: 'follow',
       ...options,
       signal: controller.signal,
@@ -229,6 +240,26 @@ async function safeFetch(url, options = {}, timeoutMs = 12000) {
         ...(options.headers || {})
       }
     });
+
+    // Permissive fallback retry if upstream blocks with 403, 502 or 503
+    if (!res.ok && (res.status === 403 || res.status === 502 || res.status === 503)) {
+      try {
+        const altHeaders = {
+          ...defaultHeaders,
+          'Referer': defaultHeaders['Referer'] !== 'https://pirlotv.la/' ? 'https://pirlotv.la/' : (new URL(url).origin + '/'),
+          'Origin': defaultHeaders['Referer'] !== 'https://pirlotv.la/' ? 'https://pirlotv.la' : new URL(url).origin
+        };
+        const retryRes = await fetch(url, {
+          redirect: 'follow',
+          ...options,
+          signal: controller.signal,
+          headers: altHeaders
+        });
+        if (retryRes.ok) {
+          res = retryRes;
+        }
+      } catch (retryErr) {}
+    }
 
     const setCookie = res.headers.get('set-cookie');
     if (setCookie) {
@@ -1090,7 +1121,7 @@ app.get('/api/network-info', (req, res) => {
 // --------------------------------------------------------------------------
 app.get('/api/stream/m3u8', async (req, res) => {
   const targetUrl = req.query.url;
-  const referer = req.query.referer || 'https://xstream.st/';
+  const referer = req.query.referer || 'https://pirlotv.la/';
 
   if (!targetUrl) {
     return res.status(400).json({ ok: false, error: 'Parámetro url faltante' });
@@ -1113,11 +1144,34 @@ app.get('/api/stream/m3u8', async (req, res) => {
       upstreamHeaders['Cookie'] = sessionCookie;
     }
 
-    const response = await fetch(targetUrl, {
+    let response = await fetch(targetUrl, {
       headers: upstreamHeaders,
       redirect: 'follow',
       signal: controller.signal
     });
+
+    // Permissive fallback retry if upstream blocks with 403, 502 or 503
+    if (!response.ok && (response.status === 403 || response.status === 502 || response.status === 503)) {
+      try {
+        const altHeaders = { ...upstreamHeaders };
+        if (upstreamHeaders['Referer'] !== 'https://pirlotv.la/') {
+          altHeaders['Referer'] = 'https://pirlotv.la/';
+          altHeaders['Origin'] = 'https://pirlotv.la';
+        } else {
+          const originHost = new URL(targetUrl).origin;
+          altHeaders['Referer'] = `${originHost}/`;
+          altHeaders['Origin'] = originHost;
+        }
+        const retryRes = await fetch(targetUrl, {
+          headers: altHeaders,
+          redirect: 'follow',
+          signal: controller.signal
+        });
+        if (retryRes.ok) {
+          response = retryRes;
+        }
+      } catch (retryErr) {}
+    }
 
     clearTimeout(timeoutId);
 
@@ -1127,6 +1181,9 @@ app.get('/api/stream/m3u8', async (req, res) => {
     }
 
     if (!response.ok) {
+      res.setHeader('Access-Control-Allow-Origin', '*');
+      res.setHeader('Access-Control-Allow-Headers', '*');
+      res.setHeader('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
       return res.status(502).json({
         ok: false,
         error: `Fallo al obtener manifiesto HLS del origen (${response.status} ${response.statusText})`,
@@ -1177,6 +1234,8 @@ app.get('/api/stream/m3u8', async (req, res) => {
 
     res.setHeader('Content-Type', 'application/vnd.apple.mpegurl; charset=utf-8');
     res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Headers', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
     res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
     res.setHeader('Connection', 'keep-alive');
     res.setHeader('Keep-Alive', 'timeout=30, max=1000');
@@ -1186,6 +1245,9 @@ app.get('/api/stream/m3u8', async (req, res) => {
     if (err.name === 'AbortError') return;
     console.error('[M3U8 Proxy Error]:', err.message);
     if (!res.headersSent) {
+      res.setHeader('Access-Control-Allow-Origin', '*');
+      res.setHeader('Access-Control-Allow-Headers', '*');
+      res.setHeader('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
       res.status(502).json({
         ok: false,
         error: 'Error de conexión con el proveedor de video (M3U8)',
@@ -1204,7 +1266,7 @@ app.get('/api/stream/m3u8', async (req, res) => {
 // --------------------------------------------------------------------------
 app.get('/api/stream/ts', async (req, res) => {
   const targetUrl = req.query.url;
-  const referer = req.query.referer || 'https://xstream.st/';
+  const referer = req.query.referer || 'https://pirlotv.la/';
 
   if (!targetUrl) {
     return res.status(400).json({ ok: false, error: 'Parámetro url faltante' });
@@ -1231,11 +1293,34 @@ app.get('/api/stream/ts', async (req, res) => {
       upstreamHeaders['Range'] = req.headers.range;
     }
 
-    const response = await fetch(targetUrl, {
+    let response = await fetch(targetUrl, {
       headers: upstreamHeaders,
       redirect: 'follow',
       signal: controller.signal
     });
+
+    // Permissive fallback retry if upstream blocks with 403, 502 or 503
+    if (!response.ok && response.status !== 206 && (response.status === 403 || response.status === 502 || response.status === 503)) {
+      try {
+        const altHeaders = { ...upstreamHeaders };
+        if (upstreamHeaders['Referer'] !== 'https://pirlotv.la/') {
+          altHeaders['Referer'] = 'https://pirlotv.la/';
+          altHeaders['Origin'] = 'https://pirlotv.la';
+        } else {
+          const originHost = new URL(targetUrl).origin;
+          altHeaders['Referer'] = `${originHost}/`;
+          altHeaders['Origin'] = originHost;
+        }
+        const retryRes = await fetch(targetUrl, {
+          headers: altHeaders,
+          redirect: 'follow',
+          signal: controller.signal
+        });
+        if (retryRes.ok || retryRes.status === 206) {
+          response = retryRes;
+        }
+      } catch (retryErr) {}
+    }
 
     clearTimeout(timeoutId);
 
@@ -1245,6 +1330,9 @@ app.get('/api/stream/ts', async (req, res) => {
     }
 
     if (!response.ok && response.status !== 206) {
+      res.setHeader('Access-Control-Allow-Origin', '*');
+      res.setHeader('Access-Control-Allow-Headers', '*');
+      res.setHeader('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
       return res.status(502).json({
         ok: false,
         error: `Fallo al obtener fragmento de video del origen (${response.status} ${response.statusText})`,
@@ -1263,6 +1351,8 @@ app.get('/api/stream/ts', async (req, res) => {
 
     res.setHeader('Content-Type', contentType);
     res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Headers', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
     res.setHeader('Access-Control-Expose-Headers', 'Content-Range, Content-Length, Accept-Ranges');
     res.setHeader('Accept-Ranges', 'bytes');
     res.setHeader('Cache-Control', 'public, max-age=3600');
@@ -1282,6 +1372,9 @@ app.get('/api/stream/ts', async (req, res) => {
       const nodeStream = Readable.fromWeb(response.body);
       nodeStream.on('error', (err) => {
         if (!res.headersSent) {
+          res.setHeader('Access-Control-Allow-Origin', '*');
+          res.setHeader('Access-Control-Allow-Headers', '*');
+          res.setHeader('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
           res.status(502).json({
             ok: false,
             error: 'Error en flujo de fragmento de video',
@@ -1299,6 +1392,9 @@ app.get('/api/stream/ts', async (req, res) => {
     if (err.name === 'AbortError') return;
     console.error('[Video Segment Streaming Error]:', err.message);
     if (!res.headersSent) {
+      res.setHeader('Access-Control-Allow-Origin', '*');
+      res.setHeader('Access-Control-Allow-Headers', '*');
+      res.setHeader('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
       res.status(502).json({
         ok: false,
         error: 'Error streaming video segment',
