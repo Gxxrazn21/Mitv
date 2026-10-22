@@ -205,6 +205,7 @@ function initSlots() {
 
     // Video play events
     slot.videoEl.addEventListener('playing', () => {
+      clearTimeout(slot.startupTimer);
       slot.loaderEl.style.display = 'none';
       slot.errorEl.style.display = 'none';
       slot.emptyEl.style.display = 'none';
@@ -511,6 +512,7 @@ function toggleForceMaxQuality() {
 function clearSlot(slotIdx) {
   const slot = slots[slotIdx];
   if (!slot) return;
+  clearTimeout(slot.startupTimer);
 
   // Abort any in-flight resolve to prevent race condition
   if (slot.abortController) {
@@ -565,6 +567,12 @@ async function loadStreamInSlot(slotIdx, matchData, optionIndex = 0) {
   }
   const controller = new AbortController();
   slot.abortController = controller;
+  clearTimeout(slot.startupTimer);
+  let resolveTimedOut = false;
+  const resolveTimer = setTimeout(() => {
+    resolveTimedOut = true;
+    controller.abort();
+  }, 20000);
 
   // Clean prior player in this slot
   if (slot.hlsInstance) {
@@ -632,7 +640,9 @@ async function loadStreamInSlot(slotIdx, matchData, optionIndex = 0) {
       throw new Error('Señal no reproducible en esta opción');
     }
   } catch (err) {
-    if (err.name === 'AbortError') return; // Cancelled by user tuning another stream
+    if (slot.abortController !== controller) return;
+    if (err.name === 'AbortError' && !resolveTimedOut) return;
+    if (resolveTimedOut) err = new Error('La fuente tardó más de 20 segundos en responder');
     console.warn(`Slot ${slotIdx} error:`, err);
     // Automatic fallback to next option if available
     if (matchData.options.length > 1 && optionIndex + 1 < matchData.options.length) {
@@ -645,6 +655,7 @@ async function loadStreamInSlot(slotIdx, matchData, optionIndex = 0) {
     slot.errorText.textContent = err.message || 'Error al conectar';
     slot.errorEl.style.display = 'flex';
   } finally {
+    clearTimeout(resolveTimer);
     if (slot.abortController === controller) {
       slot.abortController = null;
     }
@@ -653,6 +664,24 @@ async function loadStreamInSlot(slotIdx, matchData, optionIndex = 0) {
 
 // HLS.js Setup with Max-Bitrate & Intelligent Error Recovery
 function setupSlotHls(slot, streamUrl, referer) {
+  clearTimeout(slot.startupTimer);
+  slot.startupTimer = setTimeout(() => {
+    if (slot.currentMatch && slot.currentOptionIdx + 1 < slot.currentMatch.options.length) {
+      loadStreamInSlot(slot.index, slot.currentMatch, slot.currentOptionIdx + 1);
+    } else {
+      if (slot.hlsInstance) {
+        slot.hlsInstance.destroy();
+        slot.hlsInstance = null;
+      }
+      slot.mode = 'error';
+      slot.videoEl.pause();
+      slot.videoEl.removeAttribute('src');
+      slot.videoEl.load();
+      slot.loaderEl.style.display = 'none';
+      slot.errorText.textContent = 'La fuente no inició el video en 25 segundos. Prueba otra opción.';
+      slot.errorEl.style.display = 'flex';
+    }
+  }, 25000);
   slot.iframeEl.style.display = 'none';
   slot.videoEl.style.display = 'block';
 
@@ -668,7 +697,7 @@ function setupSlotHls(slot, streamUrl, referer) {
       enableWorker: true,
       lowLatencyMode: true,
       capLevelToPlayerSize: false, // CLAVE: Impide que al dividir en 2 o 4 pantallas baje la calidad a 360p/480p
-      abrEwmaDefaultEstimate: 10000000, // Fuerza estimación alta de ancho de banda (10 Mbps)
+      startLevel: -1, // Select initial quality using measured bandwidth.
       maxBufferLength: 30,
       maxMaxBufferLength: 45,
       backBufferLength: 15
@@ -679,10 +708,6 @@ function setupSlotHls(slot, streamUrl, referer) {
     hls.attachMedia(slot.videoEl);
 
     hls.on(Hls.Events.MANIFEST_PARSED, () => {
-      // Si existen varios niveles de calidad, seleccionar explícitamente el más alto disponible
-      if (hls.levels && hls.levels.length > 0) {
-        hls.currentLevel = hls.levels.length - 1;
-      }
       const isFocused = (slot.index === focusedSlotIdx);
       slot.videoEl.muted = !isFocused || isVolumeMuted;
       slot.videoEl.volume = (!isFocused || isVolumeMuted) ? 0 : currentVolume;
@@ -709,8 +734,6 @@ function setupSlotHls(slot, streamUrl, referer) {
               slot.hlsInstance = null;
               if (slot.currentMatch && slot.currentMatch.options && slot.currentOptionIdx + 1 < slot.currentMatch.options.length) {
                 loadStreamInSlot(slot.index, slot.currentMatch, slot.currentOptionIdx + 1);
-              } else if (slot.currentMatch && slot.currentMatch.options && slot.currentMatch.options.length > 1 && slot.currentOptionIdx > 0) {
-                loadStreamInSlot(slot.index, slot.currentMatch, 0);
               } else {
                 slot.loaderEl.style.display = 'none';
                 slot.errorText.textContent = 'Canal no disponible actualmente';
