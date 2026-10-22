@@ -79,12 +79,8 @@
   padding: 2px;
   gap: 4px;
 }
-.tv-mode .seg-btn {
-  min-height: 34px;
-  font-size: 13px;
-  padding: 4px 14px;
-  white-space: nowrap;
-}
+.tv-mode .seg-btn,
+.tv-mode .topbar-btn,
 .tv-mode .toggle-sidebar-btn {
   min-height: 34px;
   font-size: 13px;

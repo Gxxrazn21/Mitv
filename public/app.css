@@ -168,6 +168,35 @@ html, body {
   opacity: 1;
 }
 
+/* Topbar Button (Fullscreen) */
+.topbar-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-subtle);
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 500;
+  padding: 6px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  user-select: none;
+}
+.topbar-btn svg {
+  flex-shrink: 0;
+  opacity: 0.85;
+}
+.topbar-btn:hover {
+  background: var(--bg-card-hover);
+  color: var(--text-main);
+  border-color: var(--border-active);
+}
+.topbar-btn:active {
+  transform: scale(0.97);
+}
+
 /* Toggle Sidebar / Partidos Button */
 .toggle-sidebar-btn {
   display: inline-flex;
@@ -285,48 +314,49 @@ video::-webkit-media-controls {
 }
 
 /* True 100% Fullscreen without letterboxing or leftover bars */
-:fullscreen, :-webkit-full-screen {
+:fullscreen, :-webkit-full-screen, html.is-fullscreen {
   background: #000 !important;
   padding: 0 !important;
   margin: 0 !important;
   width: 100vw !important;
   height: 100vh !important;
+  overflow: hidden !important;
 }
-:fullscreen .topbar, :-webkit-full-screen .topbar {
+:fullscreen .topbar, :-webkit-full-screen .topbar, html.is-fullscreen .topbar {
   display: none !important;
 }
-:fullscreen .stage-footer, :-webkit-full-screen .stage-footer {
+:fullscreen .stage-footer, :-webkit-full-screen .stage-footer, html.is-fullscreen .stage-footer {
   display: none !important;
 }
-:fullscreen .sidebar, :-webkit-full-screen .sidebar {
+:fullscreen .sidebar, :-webkit-full-screen .sidebar, html.is-fullscreen .sidebar {
   display: none !important;
 }
-:fullscreen .app-stage, :-webkit-full-screen .app-stage {
+:fullscreen .app-stage, :-webkit-full-screen .app-stage, html.is-fullscreen .app-stage {
   height: 100vh !important;
   width: 100vw !important;
   margin: 0 !important;
   padding: 0 !important;
 }
-:fullscreen .stage, :-webkit-full-screen .stage {
+:fullscreen .stage, :-webkit-full-screen .stage, html.is-fullscreen .stage {
   height: 100vh !important;
   width: 100vw !important;
   margin: 0 !important;
   padding: 0 !important;
 }
-:fullscreen .video-grid, :-webkit-full-screen .video-grid {
+:fullscreen .video-grid, :-webkit-full-screen .video-grid, html.is-fullscreen .video-grid {
   height: 100vh !important;
   width: 100vw !important;
   max-height: 100vh !important;
   padding: 0 !important;
   gap: 2px !important;
 }
-:fullscreen video, :-webkit-full-screen video {
+:fullscreen video, :-webkit-full-screen video, html.is-fullscreen video {
   max-width: 100vw !important;
   max-height: 100vh !important;
   width: 100% !important;
   height: 100% !important;
 }
-:fullscreen .stream-slot, :-webkit-full-screen .stream-slot {
+:fullscreen .stream-slot, :-webkit-full-screen .stream-slot, html.is-fullscreen .stream-slot {
   border-radius: 0 !important;
 }
 
@@ -1130,6 +1160,14 @@ video.no-filter {
     font-size: 11.5px;
     gap: 4px;
     touch-action: manipulation;
+  }
+  .topbar-btn {
+    padding: 5px 8px;
+    font-size: 11.5px;
+    touch-action: manipulation;
+  }
+  .topbar-btn span {
+    display: none;
   }
   .toggle-sidebar-btn {
     padding: 5px 10px;

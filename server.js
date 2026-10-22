@@ -9,8 +9,29 @@ import net from 'net';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+// Safely load .env if present (Node 20.6.0+)
+if (typeof process.loadEnvFile === 'function') {
+  try {
+    process.loadEnvFile();
+  } catch (err) {
+    // .env is optional; process continues with environment variables or defaults
+  }
+}
+
 const app = express();
 const PORT = process.env.PORT || 7860;
+const BIND_HOST = process.env.BIND_HOST || '0.0.0.0';
+
+// Security hardening without breaking proxying or iframe embeds
+app.disable('x-powered-by');
+
+app.use((req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-XSS-Protection', '1; mode=block');
+  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+  res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+  next();
+});
 
 app.use(cors());
 app.use(express.json());
@@ -22,7 +43,7 @@ let cache = {
   channels: [],
   lastUpdated: 0
 };
-const CACHE_TTL = 3 * 60 * 1000; // 3 minutes
+const CACHE_TTL = parseInt(process.env.CACHE_TTL_MS || '180000', 10); // default 3 minutes
 
 const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
 
@@ -1899,9 +1920,9 @@ app.get('/player/clean-embed', async (req, res) => {
 });
 
 // Start server
-app.listen(PORT, '0.0.0.0', async () => {
+app.listen(PORT, BIND_HOST, async () => {
   console.log(`\n======================================================`);
-  console.log(`⚡ MiTV Studio Server activo en http://0.0.0.0:${PORT}`);
+  console.log(`⚡ MiTV Studio Server activo en http://${BIND_HOST}:${PORT}`);
   console.log(`📺 Diseño Apple TV / YouTube TV Dark • Zero-RAM Stream`);
   console.log(`======================================================\n`);
   await refreshCache();

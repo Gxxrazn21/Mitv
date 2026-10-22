@@ -6,3 +6,16 @@ yarn-debug.log*
 yarn-error.log*
 .agents/
 skills-lock.json
+
+# Environment and secrets
+.env
+.env.*
+!.env.example
+*.local
+
+# Temporary files and builds
+tmp/
+temp/
+.temp/
+dist/
+

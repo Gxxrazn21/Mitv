@@ -1289,7 +1289,16 @@ function setupUIEventListeners() {
       if (!document.fullscreenElement) {
         document.documentElement.requestFullscreen?.().catch(() => {});
       } else {
-        document.exitFullscreen().catch(() => {});
+        document.exitFullscreen?.().catch(() => {});
+      }
+    });
+
+    document.addEventListener('fullscreenchange', () => {
+      const isFull = !!document.fullscreenElement;
+      document.documentElement.classList.toggle('is-fullscreen', isFull);
+      const label = fullscreenBtn.querySelector('span');
+      if (label) {
+        label.textContent = isFull ? 'Salir' : 'Pantalla Completa';
       }
     });
   }

@@ -75,6 +75,14 @@
     </div>
 
     <div class="topbar-right">
+      <!-- Botón de Pantalla Completa (Visible en PC y dispositivos) -->
+      <button class="topbar-btn" id="fullscreenBtn" title="Pantalla completa (F)" aria-label="Pantalla completa">
+        <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/>
+        </svg>
+        <span>Pantalla Completa</span>
+      </button>
+
       <!-- Acceso esencial: Partidos y Canales en vivo -->
       <button class="toggle-sidebar-btn" id="toggleSidebarBtn" title="Ver programación de partidos y canales">
         <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2">
@@ -326,7 +334,6 @@
   <div id="hiddenLegacyControls" style="display:none;" aria-hidden="true">
     <button id="aspectFitBtn"></button>
     <button id="enhanceBtn"></button>
-    <button id="fullscreenBtn"></button>
     <button id="mobileBtn"></button>
   </div>
 
