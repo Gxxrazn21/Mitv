@@ -1,6 +1,8 @@
 # MiTV en Fire TV y Android
 
-La navegación con control remoto se ejecuta en el frontend (`tv.js`). No necesita una API de teclas ni cambios en Express. Servir los archivos actualizados de `public/`, incluidos `tv.js` y `tv.css`.
+La navegación con control remoto se ejecuta en el frontend (`tv.js`). No necesita una API de teclas ni cambios en Express. Servir los archivos actualizados de `public/`, incluidos `tv.js`, `tv.css`, `player-entry.js` y `app-tv.js`.
+
+La versión de celular/web conserva `app.js` y `app.css` originales (anteriores a la adaptación TV). `player-entry.js` elige `app-tv.js` solo cuando está activo el modo TV; fuera de TV no se registra el controlador D-pad ni se aplican estilos de TV.
 
 ## Probar localmente
 
@@ -19,7 +21,7 @@ node --test tests/tv-player.test.js
 - Volumen: izquierda/derecha sobre el deslizador; arriba/abajo para salir.
 - Tab y Shift+Tab: navegación habitual, contenida en el diálogo cuando está abierto.
 
-TV reserva 5 % por borde. Los listados y barras de herramientas conservan desplazamiento interno: no se ocultan controles para evitar scroll. La página no tiene scroll global. Android/TV desactiva nitidez SVG, normalizador Web Audio y efectos costosos; mantiene calidad adaptativa con búfer reducido. Al pasar de cuatro pantallas a dos o una, se cierran las ranuras ocultas para liberar red, memoria y decodificadores.
+TV reserva 5 % por borde. Los controles conservan su ancho en una sola fila. No hay barras de desplazamiento visibles: el contenido se desplaza automáticamente al mover el foco con el control. Arriba/abajo recorre los canales consecutivos sin cargar video; OK activa el canal. La página no tiene scroll global. Solo TV desactiva nitidez SVG, normalizador Web Audio y efectos costosos; mantiene calidad adaptativa con búfer reducido. Al pasar de cuatro pantallas a dos o una, se cierran las ranuras ocultas para liberar red, memoria y decodificadores. Estos cambios no se aplican a celulares Android.
 
 ## Contenedor APK
 

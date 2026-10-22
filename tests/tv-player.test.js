@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import vm from 'node:vm';
 import { readFileSync } from 'node:fs';
 
-const app = readFileSync(new URL('../public/app.js', import.meta.url), 'utf8');
+const app = readFileSync(new URL('../public/app-tv.js', import.meta.url), 'utf8');
 const tv = readFileSync(new URL('../public/tv.js', import.meta.url), 'utf8');
 function context(extra = {}) {
   const timers = new Map();
@@ -19,6 +19,47 @@ function context(extra = {}) {
   return { ctx, timers, run: code => vm.runInContext(code, ctx) };
 }
 const rect = (x, y, w = 40, h = 40) => ({ contains: () => false, getBoundingClientRect: () => ({ left: x, right: x + w, top: y, bottom: y + h }) });
+test('TV channel Up/Down moves one row, scrolls locally and never activates playback', () => {
+  const callbacks = [], handlers = {};
+  const list = { scrollTop:80, parentElement:null, getBoundingClientRect:() => ({top:0,bottom:80,left:0,right:200}) };
+  const doc = {
+    body:{}, documentElement:{classList:{toggle(){}}},
+    addEventListener:(name, fn) => name === 'DOMContentLoaded' ? callbacks.push(fn) : handlers[name] = fn,
+    getElementById:() => ({style:{display:'none'}}), querySelector:() => null
+  };
+  let clicks = 0;
+  const rows = Array.from({length:5}, (_, i) => ({
+    parentElement:list, closest: selector => selector === '.event-card' ? rows[i] : null,
+    matches:() => false, focus:() => {doc.activeElement = rows[i];},
+    click:() => clicks++,
+    getBoundingClientRect:() => ({top:i*40-list.scrollTop,bottom:(i+1)*40-list.scrollTop,left:0,right:200})
+  }));
+  list.querySelectorAll = () => rows;
+  const { ctx } = context({document:doc, performance:{now:()=>1000}, getComputedStyle:() => ({overflowY:'auto',overflowX:'hidden'})});
+  callbacks[0]();
+  doc.activeElement = rows[2];
+  const key = name => handlers.keydown({key:name, preventDefault(){}, stopImmediatePropagation(){}});
+  key('ArrowUp');
+  assert.equal(doc.activeElement, rows[1]);
+  assert.equal(list.scrollTop, 40);
+  key('ArrowDown'); key('ArrowDown');
+  assert.equal(doc.activeElement, rows[3]);
+  assert.equal(list.scrollTop, 80);
+  assert.equal(clicks, 0);
+});
+test('mobile and desktop do not register the TV keyboard handler or enable TV optimizations', () => {
+  for (const userAgent of ['Mozilla Android Mobile', 'Mozilla Windows NT']) {
+    const callbacks = [], events = [];
+    const {run} = context({
+      location:{search:''}, navigator:{userAgent},
+      document:{documentElement:{classList:{toggle(){}}}, addEventListener:(name,fn) => {events.push(name); if(name === 'DOMContentLoaded') callbacks.push(fn);}}
+    });
+    callbacks[0]();
+    assert.equal(run('isTV'), false);
+    assert.equal(run('lowResourceDevice'), false);
+    assert.equal(events.includes('keydown'), false);
+  }
+});
 test('D-pad prefers aligned targets, supports all four directions and stops at edges', () => {
   const { ctx, run } = context();
   ctx.center = rect(100, 100); ctx.right = rect(160, 100); ctx.left = rect(40, 100);

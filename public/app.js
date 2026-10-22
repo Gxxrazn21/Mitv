@@ -32,7 +32,7 @@ const ENHANCE_MODES = [
   { key: 'vivid', label: 'Estadio Vivo', cssClass: 'enhance-vivid' },
   { key: 'off', label: 'OFF', cssClass: '' }
 ];
-let currentEnhanceIdx = lowResourceDevice ? 2 : 0; // Starts with HD Nitidez by default
+let currentEnhanceIdx = 0; // Starts with HD Nitidez by default
 
 // Web Audio API Audio Normalizer (DynamicsCompressorNode)
 let audioCtx = null;
@@ -40,7 +40,6 @@ let compressorNode = null;
 const audioSourceMap = new Map(); // video element -> MediaElementAudioSourceNode
 
 function setupAudioNormalizer(videoEl) {
-  if (lowResourceDevice) return;
   try {
     const AudioContextClass = window.AudioContext || window.webkitAudioContext;
     if (!AudioContextClass) return;
@@ -79,11 +78,6 @@ document.addEventListener('DOMContentLoaded', async () => {
   setupUIEventListeners();
   setupKeyboardShortcuts();
   applyEnhanceMode();
-  if (lowResourceDevice) {
-    const enhance = document.getElementById('enhanceBtn');
-    enhance.disabled = true;
-    enhance.title = 'Nitidez desactivada para compatibilidad en Android/TV';
-  }
   setupVolumeControls();
   registerServiceWorkerSafely();
 
@@ -107,12 +101,7 @@ function initSlots() {
   for (let i = 0; i < SLOTS_COUNT; i++) {
     const slotEl = document.getElementById(`slot-${i}`);
     const videoEl = slotEl.querySelector('.slot-video');
-    slotEl.tabIndex = 0;
-    slotEl.setAttribute('role', 'group');
-    slotEl.setAttribute('aria-label', `Pantalla ${i + 1}; pulsa OK para activar audio y controles`);
     const iframeEl = slotEl.querySelector('.slot-iframe');
-    iframeEl.tabIndex = -1;
-    iframeEl.title = `Reproductor externo ${i + 1}`;
 
     slots.push({
       index: i,
@@ -170,7 +159,7 @@ function initSlots() {
       // Ensure the clicked slot remains playing and is not paused by the click
       if (slot.mode === 'hls' && slot.videoEl && !slot.isUserPaused) {
         if (slot.videoEl.paused) {
-          playSlotVideo(slot);
+          slot.videoEl.play().catch(() => {});
         }
       }
     };
@@ -217,8 +206,6 @@ function initSlots() {
     // Video play events
     slot.videoEl.addEventListener('playing', () => {
       clearTimeout(slot.startupTimer);
-      clearTimeout(slot.stallTimer);
-      slot.stallTimer = null;
       slot.loaderEl.style.display = 'none';
       slot.errorEl.style.display = 'none';
       slot.emptyEl.style.display = 'none';
@@ -237,24 +224,14 @@ function initSlots() {
     slot.videoEl.addEventListener('pause', () => {
       if (!slot.isUserPaused && slot.mode === 'hls' && slot.currentMatch) {
         requestAnimationFrame(() => {
-          if (!slot.isUserPaused && slot.mode === 'hls' && slot.videoEl.paused) {
-            playSlotVideo(slot);
+          if (!slot.isUserPaused && slot.videoEl.paused) {
+            slot.videoEl.play().catch(() => {});
           }
         });
       }
       updatePlayPauseUI(slot);
     });
 
-    ['waiting', 'stalled'].forEach(type => slot.videoEl.addEventListener(type, () => {
-      if (slot.mode !== 'hls' || slot.isUserPaused || slot.stallTimer) return;
-      slot.stallTimer = setTimeout(() => {
-        slot.stallTimer = null;
-        if (slot.mode === 'hls' && !slot.isUserPaused) failSlot(slot, 'La señal dejó de responder.');
-      }, 20000);
-    }));
-    slot.videoEl.addEventListener('error', () => {
-      if (slot.mode === 'hls' && !slot.hlsInstance) failSlot(slot, 'El dispositivo no pudo reproducir este formato.');
-    });
     slot.videoEl.addEventListener('play', () => {
       updatePlayPauseUI(slot);
     });
@@ -262,7 +239,6 @@ function initSlots() {
     // Iframe load event
     slot.iframeEl.addEventListener('load', () => {
       if (slot.mode === 'embed' && slot.iframeEl.src !== 'about:blank') {
-        clearTimeout(slot.startupTimer);
         slot.loaderEl.style.display = 'none';
         slot.errorEl.style.display = 'none';
         slot.emptyEl.style.display = 'none';
@@ -291,15 +267,15 @@ function setFocusedSlot(targetIdx) {
         slot.videoEl.muted = isVolumeMuted;
         slot.videoEl.volume = isVolumeMuted ? 0 : currentVolume;
         // Never pause; ensure active playback continues
-        if (!slot.isUserPaused && slot.mode === 'hls' && slot.videoEl.paused) {
-          playSlotVideo(slot);
+        if (!slot.isUserPaused && slot.videoEl.paused) {
+          slot.videoEl.play().catch(() => {});
         }
         setupAudioNormalizer(slot.videoEl);
       } else {
         // Mute inactive screens without pausing them; keep all streams fluid
         slot.videoEl.muted = true;
         if (!slot.isUserPaused && slot.videoEl.paused && slot.currentMatch) {
-          playSlotVideo(slot);
+          slot.videoEl.play().catch(() => {});
         }
       }
     } else if (slot.mode === 'embed' && slot.iframeEl && slot.iframeEl.contentWindow) {
@@ -352,13 +328,9 @@ function toggleSlotPlayPause(slot) {
   if (slot.mode === 'hls' && slot.videoEl) {
     if (slot.videoEl.paused) {
       slot.isUserPaused = false;
-      slot.startupTimer = setTimeout(() => failSlot(slot, 'El video no respondió al reanudar.'), 25000);
-      playSlotVideo(slot);
+      slot.videoEl.play().catch(() => {});
     } else {
       slot.isUserPaused = true;
-      clearTimeout(slot.startupTimer);
-      clearTimeout(slot.stallTimer);
-      slot.stallTimer = null;
       slot.videoEl.pause();
     }
     updatePlayPauseUI(slot);
@@ -416,7 +388,6 @@ function setLayout(layoutNum) {
 
   // Ensure focused slot is visible in this layout
   const maxVisible = parseInt(currentLayout, 10);
-  slots.slice(maxVisible).forEach(slot => clearSlot(slot.index));
   if (focusedSlotIdx >= maxVisible) {
     setFocusedSlot(0);
   }
@@ -470,7 +441,6 @@ function applyEnhanceMode() {
 }
 
 function cycleImageEnhance() {
-  if (lowResourceDevice) return;
   currentEnhanceIdx = (currentEnhanceIdx + 1) % ENHANCE_MODES.length;
   applyEnhanceMode();
 }
@@ -486,7 +456,7 @@ function updateQualityIndicator() {
   const slot = slots[focusedSlotIdx];
   if (!slot || slot.mode !== 'hls' || !slot.hlsInstance) {
     if (slot && slot.mode === 'embed') {
-      qualityLabel.textContent = 'Externo';
+      qualityLabel.textContent = 'HD 1080p';
       qualityBtn.classList.add('forced');
       return;
     }
@@ -505,7 +475,7 @@ function updateQualityIndicator() {
   const maxLevel = hls.levels[maxLevelIdx];
   const maxRes = maxLevel?.height ? `${maxLevel.height}p` : '1080p';
 
-  if (hls.autoLevelEnabled) {
+  if (hls.currentLevel === -1) {
     qualityLabel.textContent = `Auto (${maxRes})`;
     qualityBtn.classList.remove('forced');
   } else {
@@ -525,7 +495,7 @@ function toggleForceMaxQuality() {
 
   const maxLevelIdx = hls.levels.length - 1;
 
-  if (hls.autoLevelEnabled) {
+  if (hls.currentLevel === -1) {
     // Force highest bitrate / 1080p level
     hls.currentLevel = maxLevelIdx;
   } else {
@@ -555,11 +525,6 @@ function clearSlot(slotIdx) {
     slot.hlsInstance = null;
   }
 
-  slot.generation = (slot.generation || 0) + 1;
-  slot.mode = 'idle';
-  clearTimeout(slot.stallTimer);
-  slot.stallTimer = null;
-  slot.iframeEl.onload = null;
   slot.videoEl.pause();
   slot.videoEl.removeAttribute('src');
   slot.videoEl.load();
@@ -572,7 +537,6 @@ function clearSlot(slotIdx) {
   slot.currentOptionIdx = 0;
   slot.networkRecovered = false;
   slot.networkRetryCount = 0;
-  slot.mediaRetryCount = 0;
   slot.isUserPaused = false;
   slot.mode = 'idle';
   updatePlayPauseUI(slot);
@@ -615,11 +579,6 @@ async function loadStreamInSlot(slotIdx, matchData, optionIndex = 0) {
     slot.hlsInstance.destroy();
     slot.hlsInstance = null;
   }
-  slot.generation = (slot.generation || 0) + 1;
-  slot.mode = 'idle';
-  clearTimeout(slot.stallTimer);
-  slot.stallTimer = null;
-  slot.iframeEl.onload = null;
   slot.videoEl.pause();
   slot.videoEl.removeAttribute('src');
   slot.videoEl.load();
@@ -629,7 +588,6 @@ async function loadStreamInSlot(slotIdx, matchData, optionIndex = 0) {
   slot.currentOptionIdx = optionIndex;
   slot.networkRecovered = false;
   slot.networkRetryCount = 0;
-  slot.mediaRetryCount = 0;
   slot.isUserPaused = false;
   updatePlayPauseUI(slot);
   slot.emptyEl.style.display = 'none';
@@ -644,7 +602,7 @@ async function loadStreamInSlot(slotIdx, matchData, optionIndex = 0) {
   try {
     // Provide alternative options to backend for transparent failover
     const candidateFallbacks = (matchData.options || [])
-      .filter((_, idx) => idx > optionIndex)
+      .filter((_, idx) => idx !== optionIndex)
       .map(o => ({ name: o.name, url: o.url }));
 
     const resolveQuery = `/api/resolve?url=${encodeURIComponent(option.url)}&fallbacks=${encodeURIComponent(JSON.stringify(candidateFallbacks))}`;
@@ -705,40 +663,25 @@ async function loadStreamInSlot(slotIdx, matchData, optionIndex = 0) {
 }
 
 // HLS.js Setup with Max-Bitrate & Intelligent Error Recovery
-function failSlot(slot, message) {
-  const match = slot.currentMatch;
-  const next = slot.currentOptionIdx + 1;
-  clearSlot(slot.index);
-  if (match && next < match.options.length) {
-    loadStreamInSlot(slot.index, match, next);
-    return;
-  }
-  slot.currentMatch = match;
-  slot.currentOptionIdx = Math.max(0, next - 1);
-  slot.mode = 'error';
-  slot.emptyEl.style.display = 'none';
-  slot.errorText.textContent = message;
-  slot.errorEl.style.display = 'flex';
-  if (slot.index === focusedSlotIdx) renderStageFooterServerChips();
-}
-
-function playSlotVideo(slot) {
-  const generation = slot.generation;
-  slot.videoEl.play().catch(err => {
-    if (slot.generation !== generation || err.name !== 'NotAllowedError' || slot.mode !== 'hls') return;
-    clearTimeout(slot.startupTimer);
-    clearTimeout(slot.stallTimer);
-    slot.stallTimer = null;
-    slot.isUserPaused = true;
-    slot.loaderEl.style.display = 'none';
-    slot.errorText.textContent = 'Pulsa Reanudar para iniciar el video.';
-    slot.errorEl.style.display = 'flex';
-  });
-}
-
 function setupSlotHls(slot, streamUrl, referer) {
   clearTimeout(slot.startupTimer);
-  slot.startupTimer = setTimeout(() => failSlot(slot, 'La fuente no inició el video en 25 segundos.'), 25000);
+  slot.startupTimer = setTimeout(() => {
+    if (slot.currentMatch && slot.currentOptionIdx + 1 < slot.currentMatch.options.length) {
+      loadStreamInSlot(slot.index, slot.currentMatch, slot.currentOptionIdx + 1);
+    } else {
+      if (slot.hlsInstance) {
+        slot.hlsInstance.destroy();
+        slot.hlsInstance = null;
+      }
+      slot.mode = 'error';
+      slot.videoEl.pause();
+      slot.videoEl.removeAttribute('src');
+      slot.videoEl.load();
+      slot.loaderEl.style.display = 'none';
+      slot.errorText.textContent = 'La fuente no inició el video en 25 segundos. Prueba otra opción.';
+      slot.errorEl.style.display = 'flex';
+    }
+  }, 25000);
   slot.iframeEl.style.display = 'none';
   slot.videoEl.style.display = 'block';
 
@@ -749,16 +692,15 @@ function setupSlotHls(slot, streamUrl, referer) {
   // Use playlist proxy with full URL resolution
   const proxiedM3u8 = `/api/stream/m3u8?url=${encodeURIComponent(streamUrl)}&referer=${encodeURIComponent(referer || 'https://xstream.st/')}`;
 
-  if (typeof Hls !== 'undefined' && Hls.isSupported()) {
+  if (Hls.isSupported()) {
     const hls = new Hls({
       enableWorker: true,
       lowLatencyMode: true,
-      capLevelToPlayerSize: lowResourceDevice, // Smaller TV slots need less decoding work.
+      capLevelToPlayerSize: false, // CLAVE: Impide que al dividir en 2 o 4 pantallas baje la calidad a 360p/480p
       startLevel: -1, // Select initial quality using measured bandwidth.
-      maxBufferLength: lowResourceDevice ? 15 : 30,
-      maxMaxBufferLength: lowResourceDevice ? 20 : 45,
-      maxBufferSize: lowResourceDevice ? 20 * 1000 * 1000 : 60 * 1000 * 1000,
-      backBufferLength: lowResourceDevice ? 5 : 15
+      maxBufferLength: 30,
+      maxMaxBufferLength: 45,
+      backBufferLength: 15
     });
 
     slot.hlsInstance = hls;
@@ -769,7 +711,7 @@ function setupSlotHls(slot, streamUrl, referer) {
       const isFocused = (slot.index === focusedSlotIdx);
       slot.videoEl.muted = !isFocused || isVolumeMuted;
       slot.videoEl.volume = (!isFocused || isVolumeMuted) ? 0 : currentVolume;
-      playSlotVideo(slot);
+      slot.videoEl.play().catch(() => {});
       updateQualityIndicator();
     });
 
@@ -788,7 +730,15 @@ function setupSlotHls(slot, streamUrl, referer) {
             if (httpCode === 403 || httpCode === 502 || slot.networkRetryCount > 2) {
               slot.networkRetryCount = 0;
               console.warn(`[HLS] Bloqueo o caída de upstream (${httpCode || 'Red'}) en ranura ${slot.index + 1}. Alternando a opción de respaldo...`);
-              failSlot(slot, 'Canal no disponible actualmente');
+              hls.destroy();
+              slot.hlsInstance = null;
+              if (slot.currentMatch && slot.currentMatch.options && slot.currentOptionIdx + 1 < slot.currentMatch.options.length) {
+                loadStreamInSlot(slot.index, slot.currentMatch, slot.currentOptionIdx + 1);
+              } else {
+                slot.loaderEl.style.display = 'none';
+                slot.errorText.textContent = 'Canal no disponible actualmente';
+                slot.errorEl.style.display = 'flex';
+              }
               return;
             }
 
@@ -803,14 +753,20 @@ function setupSlotHls(slot, streamUrl, referer) {
 
           case Hls.ErrorTypes.MEDIA_ERROR:
             console.log(`[HLS] Error de códec/medio en ranura ${slot.index + 1}, ejecutando recoverMediaError()...`);
-            slot.mediaRetryCount = (slot.mediaRetryCount || 0) + 1;
-            if (slot.mediaRetryCount <= 2) hls.recoverMediaError();
-            else failSlot(slot, 'No se pudo recuperar el decodificador de video.');
+            hls.recoverMediaError();
             break;
 
           default:
             console.warn(`[HLS] Error crítico en ranura ${slot.index + 1}:`, data.details);
-            failSlot(slot, 'Error de transmisión');
+            hls.destroy();
+            slot.hlsInstance = null;
+            if (slot.currentMatch && slot.currentOptionIdx + 1 < slot.currentMatch.options.length) {
+              loadStreamInSlot(slot.index, slot.currentMatch, slot.currentOptionIdx + 1);
+            } else {
+              slot.loaderEl.style.display = 'none';
+              slot.errorText.textContent = 'Error de transmisión';
+              slot.errorEl.style.display = 'flex';
+            }
             break;
         }
       }
@@ -820,9 +776,11 @@ function setupSlotHls(slot, streamUrl, referer) {
     const isFocused = (slot.index === focusedSlotIdx);
     slot.videoEl.muted = !isFocused || isVolumeMuted;
     slot.videoEl.volume = (!isFocused || isVolumeMuted) ? 0 : currentVolume;
-    playSlotVideo(slot);
+    slot.videoEl.play().catch(() => {});
   } else {
-    failSlot(slot, 'Navegador no compatible con HLS');
+    slot.loaderEl.style.display = 'none';
+    slot.errorText.textContent = 'Navegador no compatible con HLS';
+    slot.errorEl.style.display = 'flex';
   }
 }
 
@@ -832,12 +790,9 @@ function setupSlotEmbed(slot, embedUrl) {
   slot.videoEl.style.display = 'none';
   slot.iframeEl.style.display = 'block';
 
-  slot.startupTimer = setTimeout(() => failSlot(slot, 'El reproductor externo no respondió en 25 segundos.'), 25000);
   slot.iframeEl.src = embedUrl;
 
   slot.iframeEl.onload = () => {
-    if (slot.mode !== 'embed') return;
-    clearTimeout(slot.startupTimer);
     slot.loaderEl.style.display = 'none';
     slot.errorEl.style.display = 'none';
     slot.emptyEl.style.display = 'none';
@@ -878,7 +833,6 @@ function renderStageFooterServerChips() {
   }
 
   const match = focusedSlot.currentMatch;
-  const focusedChip = [...container.children].indexOf(document.activeElement);
   container.innerHTML = '';
 
   match.options.forEach((opt, idx) => {
@@ -892,7 +846,6 @@ function renderStageFooterServerChips() {
 
     container.appendChild(chip);
   });
-  if (focusedChip >= 0) container.children[Math.min(focusedChip, container.children.length - 1)]?.focus();
 }
 
 async function probeFastestForFocusedSlot() {
@@ -1046,10 +999,6 @@ function renderSidebarList() {
   filtered.forEach(item => {
     const card = document.createElement('div');
     card.className = 'event-card';
-    card.tabIndex = 0;
-    card.setAttribute('role', 'button');
-    card.dataset.itemId = String(item.id);
-    card.setAttribute('aria-label', item.title || item.name);
 
     const isPlaying = slots[focusedSlotIdx]?.currentMatch?.id === item.id;
     if (isPlaying) card.classList.add('active-in-slot');
@@ -1108,8 +1057,11 @@ function renderSidebarList() {
 function highlightActiveMatchInSidebar() {
   const activeId = slots[focusedSlotIdx]?.currentMatch?.id;
   document.querySelectorAll('.event-card').forEach(card => {
-    card.classList.toggle('active-in-slot', activeId != null && card.dataset.itemId === String(activeId));
+    card.classList.remove('active-in-slot');
   });
+  if (activeId) {
+    renderSidebarList();
+  }
 }
 
 // --------------------------------------------------------------------------
@@ -1164,7 +1116,7 @@ function setupUIEventListeners() {
   // Fullscreen button
   document.getElementById('fullscreenBtn').addEventListener('click', () => {
     if (!document.fullscreenElement) {
-      document.documentElement.requestFullscreen?.().catch(() => {});
+      document.documentElement.requestFullscreen().catch(() => {});
     } else {
       document.exitFullscreen().catch(() => {});
     }
@@ -1226,17 +1178,12 @@ function setupUIEventListeners() {
 
   mobileBtn.addEventListener('click', () => {
     phoneModal.style.display = 'flex';
-    closePhoneModalBtn.focus();
   });
   closePhoneModalBtn.addEventListener('click', () => {
     phoneModal.style.display = 'none';
-    mobileBtn.focus();
   });
   phoneModal.addEventListener('click', (e) => {
-    if (e.target === phoneModal) {
-      phoneModal.style.display = 'none';
-      mobileBtn.focus();
-    }
+    if (e.target === phoneModal) phoneModal.style.display = 'none';
   });
 
   copyLanUrlBtn.addEventListener('click', () => {
@@ -1251,7 +1198,6 @@ function setupUIEventListeners() {
 
 function setupKeyboardShortcuts() {
   window.addEventListener('keydown', (e) => {
-    if (e.defaultPrevented) return;
     if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
 
     // Keys 1, 2, 3, 4 switch audio focus and purple outline
@@ -1272,7 +1218,7 @@ function setupKeyboardShortcuts() {
     // Key 'f' toggles Fullscreen
     if (e.key === 'f' || e.key === 'F') {
       if (!document.fullscreenElement) {
-        document.documentElement.requestFullscreen?.().catch(() => {});
+        document.documentElement.requestFullscreen().catch(() => {});
       } else {
         document.exitFullscreen().catch(() => {});
       }

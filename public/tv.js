@@ -1,7 +1,7 @@
 /* Remote navigation also works with a desktop keyboard. ?tv=1 forces TV layout. */
 const tvMode = new URLSearchParams(location.search).get('tv');
 const isTV = tvMode === '1' || (tvMode !== '0' && /AFT|Fire TV|Android TV|GoogleTV|SmartTV|SMART-TV|HbbTV/i.test(navigator.userAgent));
-const lowResourceDevice = isTV || /Android/i.test(navigator.userAgent);
+const lowResourceDevice = isTV;
 document.documentElement.classList.toggle('tv-mode', isTV);
 document.documentElement.classList.toggle('low-resource', lowResourceDevice);
 
@@ -25,11 +25,30 @@ function directionalTarget(items, current, direction) {
 }
 
 document.addEventListener('DOMContentLoaded', () => {
+  if (!isTV) return;
   const modal = document.getElementById('phoneModal');
   const selector = 'button, input, [tabindex="0"]';
   const visible = el => !el.disabled && !el.closest('.sidebar.collapsed') && el.getClientRects().length && getComputedStyle(el).visibility !== 'hidden';
   const candidates = () => [...(modal.style.display !== 'none' ? modal : document).querySelectorAll(selector)].filter(visible);
-  const focus = el => { if (el) { el.focus({ preventScroll: true }); el.scrollIntoView({ block: 'nearest', inline: 'nearest' }); } };
+  const focus = el => {
+    if (!el) return;
+    el.focus({ preventScroll: true });
+    // Scroll only the local list/toolbar, never the page or the video stage.
+    let parent = el.parentElement;
+    while (parent && parent !== document.body) {
+      const style = getComputedStyle(parent);
+      const rect = el.getBoundingClientRect(), box = parent.getBoundingClientRect();
+      if (/auto|scroll/.test(style.overflowY)) {
+        if (rect.top < box.top) parent.scrollTop -= box.top - rect.top;
+        else if (rect.bottom > box.bottom) parent.scrollTop += rect.bottom - box.bottom;
+      }
+      if (/auto|scroll/.test(style.overflowX)) {
+        if (rect.left < box.left) parent.scrollLeft -= box.left - rect.left;
+        else if (rect.right > box.right) parent.scrollLeft += rect.right - box.right;
+      }
+      parent = parent.parentElement;
+    }
+  };
   let lastMove = 0;
   document.addEventListener('keydown', e => {
     const key = e.key;
@@ -49,6 +68,16 @@ document.addEventListener('DOMContentLoaded', () => {
       e.preventDefault(); e.stopImmediatePropagation();
       if (e.repeat && performance.now() - lastMove < 80) return;
       lastMove = performance.now();
+      // Channel rows are ordered content. Never jump to another region while
+      // moving vertically through them, even when neighbouring rows are clipped.
+      const card = active.closest('.event-card');
+      if (card && (key === 'ArrowUp' || key === 'ArrowDown')) {
+        const rows = [...card.parentElement.querySelectorAll('.event-card')];
+        const next = rows[rows.indexOf(card) + (key === 'ArrowUp' ? -1 : 1)];
+        if (next) focus(next);
+        else if (key === 'ArrowUp') focus(document.querySelector('.filter-chip.active') || document.getElementById('searchInput'));
+        return;
+      }
       const items = candidates();
       focus(items.includes(active) ? directionalTarget(items, active, key) : items[0]);
     } else if ((key === 'Enter' || key === ' ' || key === 'Select') && active.matches(selector)) {
